@@ -387,64 +387,45 @@ dash.add_metric(iteration=1, loss=0.5, elo=1050)
 dash.update_progress(step=50, total=100)
 ```
 
-### Any Language (REST API)
+### Any Language (REST API + WebSocket)
 
-The dashboard is a standard HTTP server. Any language that can send JSON over HTTP works. Start the dashboard with `python dashboard.py` (or from Python), then push data from anywhere:
+The dashboard is a standard HTTP + WebSocket server. Your bot can be written in any language - Rust, C++, Go, JavaScript, Java, or anything else. As long as it can send JSON over HTTP or connect via Socket.IO, it has full access to every dashboard feature: game replay, ELO tracking, charts, progress bars, and live stats.
 
-**curl:**
+Start the dashboard once with `python dashboard.py`, then send data from your bot process:
+
+**REST API** - submit games and metrics via HTTP POST:
+
 ```bash
-curl -X POST http://localhost:5001/api/game \
-  -H 'Content-Type: application/json' \
-  -d '{"moves": [[0,0],[1,0],[0,1],[2,0]], "result": 1.0}'
+# After each game your bot plays, send the move list and result:
+POST http://localhost:5001/api/game
+{ "moves": [[0,0],[1,0],[0,1],[2,0]], "result": 1.0 }
 
-curl -X POST http://localhost:5001/api/metric \
-  -H 'Content-Type: application/json' \
-  -d '{"iteration": 5, "loss": {"total": 0.82}, "elo": 1100}'
+# After each training iteration, send metrics:
+POST http://localhost:5001/api/metric
+{ "iteration": 5, "loss": {"total": 0.82}, "elo": 1100, "wins": [8,2,0], "games": 10 }
+
+# Read data back:
+GET http://localhost:5001/api/stats      # current stats
+GET http://localhost:5001/api/elo        # ELO history
+GET http://localhost:5001/api/games      # recent game replays
+GET http://localhost:5001/api/losses     # loss curve data
+GET http://localhost:5001/api/resources  # CPU/RAM history
 ```
 
-**Rust:**
-```rust
-let client = reqwest::Client::new();
-client.post("http://localhost:5001/api/game")
-    .json(&serde_json::json!({
-        "moves": [[0,0],[1,0],[0,1]],
-        "result": 1.0
-    }))
-    .send().await?;
+**WebSocket** - for real-time streaming (Socket.IO protocol):
+
+```
+# Client sends:
+event: 'game_result'  data: { moves: [...], result: 1.0 }
+event: 'metric'       data: { iteration: 5, loss: {...}, elo: 1100 }
+
+# Server pushes back:
+event: 'game_complete'  data: { game_idx, moves, result, ... }
+event: 'stats_update'   data: { iteration, total_games, elo, ... }
+event: 'train_progress' data: { step, total, pct, phase, ... }
 ```
 
-**C++:**
-```cpp
-// Using cpr (C++ Requests)
-cpr::Post(cpr::Url{"http://localhost:5001/api/game"},
-    cpr::Header{{"Content-Type", "application/json"}},
-    cpr::Body{R"({"moves":[[0,0],[1,0]],"result":1.0})"});
-```
-
-**JavaScript / Node.js:**
-```javascript
-fetch('http://localhost:5001/api/game', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ moves: [[0,0],[1,0]], result: 1.0 })
-});
-```
-
-### WebSocket API (real-time)
-
-For streaming data, connect via Socket.IO:
-
-```javascript
-const socket = io('http://localhost:5001');
-
-// Push data
-socket.emit('game_result', { moves: [[0,0],[1,0]], result: 1.0 });
-socket.emit('metric', { iteration: 5, loss: { total: 0.82 }, elo: 1100 });
-
-// Listen for updates
-socket.on('game_complete', d => console.log('Game:', d));
-socket.on('stats_update', d => console.log('Stats:', d));
-```
+The REST API is simplest to integrate - every language has an HTTP client. The WebSocket gives you real-time updates pushed from the server (useful if you want your bot to react to dashboard state). Both give full access to all dashboard features.
 
 ### Game Viewer
 
