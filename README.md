@@ -1111,6 +1111,9 @@ The full project (not included in this framework repo) includes a Playwright-bas
 | `examples/evolutionary.py` | Evolutionary | Evolve scoring weights through tournament selection |
 | `examples/train_bot.py` | Neural network | Train an AlphaZero-style bot from scratch |
 | `examples/bot_vs_bot.py` | Comparison | Compare multiple bot types head-to-head |
+| `examples/dashboard_arena.py` | Dashboard | Watch two bots play with live ELO tracking |
+| `examples/dashboard_train.py` | Dashboard | Train with auto-ELO via bot snapshots |
+| `examples/dashboard_custom_bot.py` | Dashboard | Plug your own bot function into the dashboard |
 
 ## Advanced: Speedup Techniques
 
