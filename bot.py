@@ -3148,12 +3148,14 @@ def self_play_game_v2(
         if not policy:
             break
 
-        # --- DISTANT EXPLORATION: place stones 2-5 hexes from nearest stone ---
-        if PLAY_STYLE == 'distant' and move_count < 15 and random.random() < DISTANT_EXPLORE_PROB:
+        # --- DISTANT EXPLORATION: inject gap candidates into policy ---
+        # Instead of forcing moves, add distant positions as options with
+        # small probability so MCTS can discover their value naturally.
+        if PLAY_STYLE == 'distant' and move_count < 15:
             existing = _get_existing_stones(game)
-            if existing:
-                lo, hi = DISTANT_RANGE  # min/max distance from nearest stone
-                gap_candidates = set()
+            if existing and len(policy) > 0:
+                lo, hi = DISTANT_RANGE
+                gap_candidates = []
                 for sq, sr in existing:
                     for dq in range(-hi, hi + 1):
                         for dr in range(-hi, hi + 1):
@@ -3161,13 +3163,19 @@ def self_play_game_v2(
                             if d < lo or d > hi:
                                 continue
                             cq, cr = sq + dq, sr + dr
-                            if (cq, cr) not in existing:
-                                gap_candidates.add((cq, cr))
+                            if (cq, cr) not in existing and (cq, cr) not in policy:
+                                gap_candidates.append((cq, cr))
                 if gap_candidates:
-                    forced = random.choice(list(gap_candidates))
-                    policy = {forced: 1.0}
-                    nearest = min(abs(forced[0]-s[0]) + abs(forced[1]-s[1]) for s in existing)
-                    print(f'  │  ⚡ DISTANT: mv{move_count} → ({forced[0]},{forced[1]}) nearest_stone={nearest}')
+                    # Add a few random gap positions with small weight
+                    n_inject = min(3, len(gap_candidates))
+                    injected = random.sample(gap_candidates, n_inject)
+                    # Give each injected move ~5% of total probability
+                    inject_weight = 0.05 / n_inject
+                    total = sum(policy.values())
+                    scale = (1.0 - inject_weight * n_inject)
+                    policy = {m: p * scale / total for m, p in policy.items()}
+                    for m in injected:
+                        policy[m] = inject_weight
 
         # --- RESIGN THRESHOLD: stop hopeless games early ---
         # Disabled: causes false "draws" on an infinite board where draws don't exist
