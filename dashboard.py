@@ -461,13 +461,47 @@ footer span{white-space:nowrap}
 .progress-track{flex:1;height:6px;background:#eee;border-radius:3px;overflow:hidden}
 .progress-fill{height:100%;background:#000;width:0%;transition:width .2s}
 .progress-label{font:700 10px 'Courier New';min-width:120px;text-align:right}
+.settings-btn{cursor:pointer;font-size:18px;margin-left:12px;user-select:none}
+.settings-panel{position:absolute;top:42px;right:20px;background:#fff;border:1px solid #000;
+  padding:16px;z-index:100;font:11px 'SF Mono','Courier New',monospace;min-width:260px;box-shadow:2px 2px 0 #0001}
+.settings-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.settings-row label{width:110px;font-weight:700;flex-shrink:0}
+.settings-row input[type=range]{flex:1;accent-color:#000}
+.settings-row span.val{width:50px;text-align:right;font-size:10px}
 </style>
 </head>
 <body>
 <header>
   <span class="title">Hex Bot Training</span>
   <span class="status" id="status">IDLE</span>
+  <span class="settings-btn" onclick="toggleSettings()">&#9881;</span>
 </header>
+<div id="settings-panel" class="settings-panel" style="display:none">
+  <div style="font-weight:700;margin-bottom:12px;letter-spacing:2px;font-size:10px;text-transform:uppercase">Settings</div>
+  <div class="settings-row">
+    <label>Replay speed</label>
+    <input type="range" id="set-speed" min="50" max="500" value="120" step="10"
+      oninput="saveSetting('replaySpeed',+this.value);el('set-speed-val').textContent=this.value+'ms'">
+    <span class="val" id="set-speed-val">120ms</span>
+  </div>
+  <div class="settings-row">
+    <label>Dot size</label>
+    <input type="range" id="set-dotsize" min="1" max="5" value="2" step="0.5"
+      oninput="saveSetting('dotSize',+this.value);el('set-dotsize-val').textContent=this.value;drawHex()">
+    <span class="val" id="set-dotsize-val">2</span>
+  </div>
+  <div class="settings-row">
+    <label>Grid radius</label>
+    <input type="range" id="set-radius" min="1" max="4" value="2" step="1"
+      oninput="saveSetting('emptyHexRadius',+this.value);el('set-radius-val').textContent=this.value;drawHex()">
+    <span class="val" id="set-radius-val">2</span>
+  </div>
+  <div class="settings-row">
+    <label>Auto-refresh</label>
+    <input type="checkbox" id="set-autorefresh" checked
+      onchange="saveSetting('autoRefresh',this.checked)">
+  </div>
+</div>
 <main>
   <div class="left">
     <div id="live-stats">
@@ -616,6 +650,16 @@ function toggleChart(name) {
 const HEX_SIZE = 18;
 const S3 = Math.sqrt(3);
 
+// Settings (persisted to localStorage)
+const defaultSettings = { replaySpeed: 120, dotSize: 2, emptyHexRadius: 2, autoRefresh: true };
+let settings = Object.assign({}, defaultSettings);
+try { const s = JSON.parse(localStorage.getItem('hexdash_settings')); if (s) Object.assign(settings, s); } catch(e) {}
+function saveSetting(key, val) { settings[key] = val; localStorage.setItem('hexdash_settings', JSON.stringify(settings)); }
+function toggleSettings() {
+  const p = el('settings-panel');
+  p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+
 function axToPixel(q, r) {
   return [HEX_SIZE * (S3 * q + S3 / 2 * r), HEX_SIZE * (1.5 * r)];
 }
@@ -661,6 +705,27 @@ function drawHex() {
     ctx.closePath();
   }
   const hr = HEX_SIZE * sc * 0.88;
+
+  // Empty hex dots around placed stones
+  const stoneSet = new Set(all.map(s => s[0] + ',' + s[1]));
+  const emptySet = new Set();
+  const dotR = settings.emptyHexRadius;
+  for (const [q, r] of all) {
+    for (let dq = -dotR; dq <= dotR; dq++) {
+      for (let dr = -dotR; dr <= dotR; dr++) {
+        if (Math.abs(dq) + Math.abs(dr) > dotR + 1) continue;
+        const key = (q + dq) + ',' + (r + dr);
+        if (!stoneSet.has(key) && !emptySet.has(key)) {
+          emptySet.add(key);
+          const [sx, sy] = toS(q + dq, r + dr);
+          ctx.fillStyle = '#ccc';
+          ctx.beginPath();
+          ctx.arc(sx, sy, Math.max(1.5, settings.dotSize * sc), 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
 
   // P0: solid black hexagons
   for (const [q, r] of stones0) {
@@ -723,7 +788,7 @@ function replayGame(d) {
     if (stonesInTurn >= needed) { curPlayer = 1 - curPlayer; stonesInTurn = 0; }
     drawHex();
     setInfo('Game #' + d.game_idx + ' \u2014 Move ' + mi + '/' + moves.length);
-  }, 120);
+  }, settings.replaySpeed);
 }
 
 // ---------------------------------------------------------------------------
@@ -961,8 +1026,17 @@ window.addEventListener('resize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Init
+// Init — restore settings from localStorage
 // ---------------------------------------------------------------------------
+(function initSettings() {
+  el('set-speed').value = settings.replaySpeed;
+  el('set-speed-val').textContent = settings.replaySpeed + 'ms';
+  el('set-dotsize').value = settings.dotSize;
+  el('set-dotsize-val').textContent = settings.dotSize;
+  el('set-radius').value = settings.emptyHexRadius;
+  el('set-radius-val').textContent = settings.emptyHexRadius;
+  el('set-autorefresh').checked = settings.autoRefresh;
+})();
 setTimeout(() => { drawHex(); fetchCharts(); }, 100);
 fetch('/api/stats').then(r => r.json()).then(s => {
   el('s-games').textContent = s.total_games;
