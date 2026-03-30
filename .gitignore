@@ -1,0 +1,42 @@
+# Training artifacts
+hex_checkpoint_*.pt
+replay_buffer.pkl
+*.jsonl
+
+# Compiled C engine (auto-built from engine.c)
+engine.so
+*.o
+
+# Generated files
+figures/
+network_vis_*.png
+network_hex_*.png
+*.pkl
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Claude config
+.claude/
+
+# Internal tools (not part of framework)
+bot.py
+main.py
+dashboard.py
+browser_player.py
+online_player.py
+scrape_games.py
+generate_figures.py
+visualize_network.py
+triangle/
+strategy_doc.pdf
+PROJECT_SUMMARY.md
+STRATEGY.md
