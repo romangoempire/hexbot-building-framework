@@ -8,7 +8,7 @@ Showcases how to build an evolutionary bot using the hexbot framework
 and visualize its improvement with the training dashboard.
 
 The bot starts with random heuristic weights and evolves them through
-tournament selection against a heuristic baseline. Watch the ELO chart
+tournament selection against a random baseline. Watch the ELO chart
 climb as the bot discovers better weight combinations.
 
 Note: This demo intentionally keeps the bot logic simple for readability.
@@ -25,8 +25,9 @@ import math
 import copy
 
 sys.path.insert(0, '.')
-from hexbot import HexGame, evaluate_moves, Bot
+from hexbot import HexGame, evaluate_moves
 from dashboard_clean import Dashboard
+
 
 # ---------------------------------------------------------------------------
 # Evolving heuristic bot
@@ -41,31 +42,41 @@ class EvoBot:
 
     def __init__(self, weights=None):
         self.weights = weights or {
-            'score': random.uniform(0.5, 2.0),
-            'center': random.uniform(-0.3, 0.8),
-            'aggression': random.uniform(0.0, 1.0),
-            'noise': random.uniform(0.0, 0.3),
+            'score': random.uniform(0.2, 2.0),
+            'center': random.uniform(-0.5, 1.0),
+            'extend': random.uniform(0.0, 1.5),
+            'block': random.uniform(0.0, 1.0),
+            'noise': random.uniform(0.0, 0.5),
         }
 
     def best_move(self, game):
-        top = evaluate_moves(game, top_n=12)
+        top = evaluate_moves(game, top_n=15)
         if not top:
             moves = game.legal_moves()
             return random.choice(moves) if moves else (0, 0)
 
         best_move, best_val = top[0][0], -1e9
+        max_score = max(s for _, s in top) or 1
         for move, score in top:
             q, r = move
-            val = score * self.weights['score']
-            val -= (abs(q) + abs(r)) * self.weights['center'] * 0.05
-            val += score * self.weights['aggression'] * 0.2 if score > 50 else 0
-            val += random.gauss(0, max(0.01, self.weights['noise']))
+            # Base: C engine heuristic score (normalized)
+            val = (score / max_score) * self.weights['score']
+            # Center preference (negative weight = prefer edges)
+            val -= (abs(q) + abs(r)) * self.weights['center'] * 0.02
+            # High-score bonus (reward extending strong lines)
+            if score > max_score * 0.8:
+                val += self.weights['extend'] * 0.5
+            # Blocking bonus (reward moves near opponent territory)
+            if score > max_score * 0.5:
+                val += self.weights['block'] * 0.2
+            # Exploration noise
+            val += random.gauss(0, max(0.01, self.weights['noise'] * 0.3))
             if val > best_val:
                 best_val = val
                 best_move = move
         return best_move
 
-    def mutate(self, strength=0.15):
+    def mutate(self, strength=0.2):
         """Return a mutated copy."""
         new_w = {}
         for k, v in self.weights.items():
@@ -84,20 +95,21 @@ class EvoBot:
         return f'EvoBot({w})'
 
 
-def play_match(bot_a, bot_b, games=2):
-    """Play a match between two bots. Returns (wins_a, wins_b, game_data)."""
+def random_bot(game):
+    """Baseline: random legal moves."""
+    moves = game.legal_moves()
+    return random.choice(moves) if moves else (0, 0)
+
+
+def play_match(bot_a, bot_b, games=4):
+    """Play a match. Returns (wins_a, wins_b, game_data_list)."""
     wins_a, wins_b = 0, 0
     all_games = []
     for g in range(games):
         game = HexGame()
         moves = []
-        # Alternate sides
-        if g % 2 == 0:
-            bots = [bot_a, bot_b]
-            a_is_p0 = True
-        else:
-            bots = [bot_b, bot_a]
-            a_is_p0 = False
+        a_is_p0 = (g % 2 == 0)
+        bots = [bot_a, bot_b] if a_is_p0 else [bot_b, bot_a]
 
         while not game.is_over:
             bot = bots[game.current_player]
@@ -105,13 +117,17 @@ def play_match(bot_a, bot_b, games=2):
             moves.append(list(move))
             game.place(*move)
 
-        p0_won = game.winner == 0
-        if (p0_won and a_is_p0) or (not p0_won and not a_is_p0):
-            wins_a += 1
-            result = 1.0
+        if game.winner is not None:
+            p0_won = (game.winner == 0)
+            a_won = (p0_won and a_is_p0) or (not p0_won and not a_is_p0)
+            if a_won:
+                wins_a += 1
+                result = 1.0
+            else:
+                wins_b += 1
+                result = -1.0
         else:
-            wins_b += 1
-            result = -1.0
+            result = 0.0
 
         all_games.append((moves, result, len(moves)))
     return wins_a, wins_b, all_games
@@ -127,18 +143,18 @@ time.sleep(1)
 
 print("Dashboard: http://localhost:5002")
 print("=" * 50)
-print("Evolving a heuristic bot against the C engine baseline")
+print("Evolving a heuristic bot against random baseline")
 print("Watch the ELO chart to see improvement!")
 print("Press Ctrl+C to stop")
 print("=" * 50)
 print()
 
 POP_SIZE = 8
-GAMES_PER_EVAL = 4
-baseline = Bot.heuristic()
+GAMES_PER_EVAL = 6
 
 population = [EvoBot() for _ in range(POP_SIZE)]
 champion = None
+champion_elo = 1000.0
 generation = 0
 
 try:
@@ -146,18 +162,17 @@ try:
         generation += 1
         t0 = time.time()
 
-        # --- Evaluate each bot against baseline ---
+        # --- Evaluate each bot against random baseline ---
         fitness = []
         total_lengths = []
 
         for i, bot in enumerate(population):
-            wins, losses, games_data = play_match(bot, baseline, GAMES_PER_EVAL)
+            wins, losses, games_data = play_match(bot, random_bot, GAMES_PER_EVAL)
 
-            # Stream games to dashboard (with small delay so replay works)
             for moves, result, length in games_data:
                 dash.add_game(moves, result)
                 total_lengths.append(length)
-                time.sleep(0.15)  # let dashboard replay catch up
+                time.sleep(0.1)
 
             fitness.append((wins, i))
             dash.update_progress(i + 1, POP_SIZE, phase='evolution')
@@ -175,12 +190,18 @@ try:
 
         # --- ELO: best bot vs previous champion ---
         elo = None
-        if champion is not None:
-            champ_wins, champ_losses, _ = play_match(best_bot, champion, 6)
-            wr = max(0.05, min(0.95, champ_wins / 6))
+        if champion is not None and generation > 1:
+            champ_wins, champ_losses, elo_games = play_match(best_bot, champion, 8)
+            for moves, result, length in elo_games:
+                dash.add_game(moves, result)
+                time.sleep(0.05)
+
+            wr = champ_wins / 8
+            wr = max(0.05, min(0.95, wr))
             elo_delta = 400 * math.log10(wr / (1 - wr))
-            elo = round(1000 + generation * 2 + elo_delta, 1)
-            dash.update_progress(6, 6, phase='elo-eval')
+            # Smooth ELO update
+            champion_elo = champion_elo + elo_delta * 0.2
+            elo = round(champion_elo, 1)
 
         # --- Push metrics ---
         dash.add_metric(
@@ -195,32 +216,30 @@ try:
 
         # --- Print ---
         elo_str = f', ELO {elo}' if elo else ''
+        wr_pct = round(total_wins / total_games * 100)
         print(f'Gen {generation:3d} | best {best_wins}/{GAMES_PER_EVAL}W'
               f' worst {worst_wins}/{GAMES_PER_EVAL}W'
-              f' | avg_len {avg_len} | {sp_time:.1f}s{elo_str}')
+              f' | win rate {wr_pct}% | avg {avg_len} moves | {sp_time:.1f}s{elo_str}')
         print(f'         {best_bot}')
 
         # --- Evolution ---
-        # Keep top half
         survivors = [bot for bot, _ in ranked[:POP_SIZE // 2]]
         champion = copy.deepcopy(survivors[0])
 
-        # Fill rest with mutations and crossovers
         children = []
         while len(children) < POP_SIZE // 2:
-            if random.random() < 0.7:
-                # Mutate a random survivor
+            if random.random() < 0.6:
                 parent = random.choice(survivors)
                 children.append(parent.mutate())
             else:
-                # Crossover two survivors
                 p1, p2 = random.sample(survivors, 2)
                 children.append(p1.crossover(p2))
 
         population = survivors + children
-        time.sleep(0.3)
+        time.sleep(0.2)
 
 except KeyboardInterrupt:
     print(f"\nStopped after {generation} generations")
     if champion:
         print(f"Champion: {champion}")
+        print(f"Final ELO: {champion_elo:.0f}")
