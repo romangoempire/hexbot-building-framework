@@ -78,7 +78,7 @@ NUM_SIMULATIONS = 400
 TEMP_THRESHOLD = 35  # was 20 — explore longer into mid-game where we're weakest
 
 REPLAY_BUFFER_SIZE = 400_000  # 4x larger for diverse experience
-BATCH_SIZE = 512
+BATCH_SIZE = 1024
 LEARNING_RATE = 0.001
 L2_REG = 1e-4
 
