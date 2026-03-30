@@ -538,30 +538,7 @@ class DashboardObserver:
             'total_games': total_games,
             'result': result,
             'num_moves': len(move_history),
-        })
-        # Replay this game in the dashboard (uses socketio background task)
-        self.sio.start_background_task(
-            self._replay_game, list(move_history), result)
-
-    def _replay_game(self, move_history, result):
-        """Replay a training game move-by-move in the dashboard."""
-        game = HexGame(candidate_radius=3, max_total_stones=200)
-        self.sio.emit('live_game_start', {})
-        for i, move in enumerate(move_history):
-            q, r = move if isinstance(move, (list, tuple)) else (move[0], move[1])
-            player = game.current_player
-            game.place_stone(q, r)
-            self.sio.emit('live_game_move', {
-                'move': [q, r], 'player': player, 'move_num': i + 1,
-                'stones_0': [list(s) for s in game.stones_0],
-                'stones_1': [list(s) for s in game.stones_1],
-                'candidates': [list(c) for c in list(game.candidates)[:80]],
-                'value': round(result, 3), 'current_player': player,
-                'top_moves_current': [], 'top_moves_opponent': [],
-            })
-            self.sio.sleep(0.12)
-        self.sio.emit('live_game_end', {
-            'winner': game.winner, 'total_moves': len(move_history),
+            'moves': move_history,
         })
 
     def on_iteration_complete(self, metrics: dict) -> None:
@@ -1760,6 +1737,7 @@ socket.on('training_complete', ()=>{
   el('status').textContent='COMPLETE';
   el('btn-start').classList.remove('active');
 });
+let replayTimer=null;
 socket.on('game_complete', d=>{
   el('status').textContent='ITER '+el('s-iter').textContent+' G'+d.game_idx+'/'+d.total_games;
   const pw=el('progress-wrap'), pf=el('progress-fill'), pl=el('progress-label');
@@ -1767,6 +1745,29 @@ socket.on('game_complete', d=>{
   const pct=Math.round(d.game_idx/d.total_games*100);
   pf.style.width=pct+'%';
   pl.textContent='Self-play '+d.game_idx+'/'+d.total_games;
+  // Replay this training game client-side
+  if(d.moves && d.moves.length>0){
+    if(replayTimer) clearInterval(replayTimer);
+    stones0=[]; stones1=[]; candidates=[];
+    let mi=0, pl0=0, stt=0;
+    const mv=d.moves;
+    setInfo('Training game '+d.game_idx+'...');
+    replayTimer=setInterval(()=>{
+      if(mi>=mv.length){
+        clearInterval(replayTimer); replayTimer=null;
+        const w=d.result>0?'P0':'P1';
+        setInfo('Game '+d.game_idx+': '+w+' wins ('+mv.length+' moves)');
+        return;
+      }
+      const m=mv[mi];
+      if(pl0===0) stones0.push(m); else stones1.push(m);
+      mi++; stt++;
+      const need=(stones0.length+stones1.length<=1)?1:2;
+      if(stt>=need){pl0=1-pl0; stt=0;}
+      drawHex();
+      setInfo('Game '+d.game_idx+' — Move '+mi+'/'+mv.length);
+    },120);
+  }
 });
 socket.on('train_progress', d=>{
   const pw=el('progress-wrap'), pf=el('progress-fill'), pl=el('progress-label');
