@@ -29,18 +29,21 @@ try:
 
         for g in range(n_games):
             game_idx += 1
-            # Generate a realistic-ish game: stones near origin with some spread
+            # Generate a realistic-ish game with no duplicate positions
             n_moves = random.randint(12, 35)
             moves = []
-            # Start near center, expand outward
+            occupied = set()
             cq, cr = 0, 0
             for m in range(n_moves):
-                dq = random.randint(-3, 3)
-                dr = random.randint(-3, 3)
-                q = cq + dq
-                r = cr + dr
+                # Try to find an unoccupied cell nearby
+                for _ in range(20):
+                    dq = random.randint(-3, 3)
+                    dr = random.randint(-3, 3)
+                    q, r = cq + dq, cr + dr
+                    if (q, r) not in occupied:
+                        break
+                occupied.add((q, r))
                 moves.append([q, r])
-                # Drift the center slightly
                 if random.random() < 0.3:
                     cq += random.choice([-1, 0, 1])
                     cr += random.choice([-1, 0, 1])
