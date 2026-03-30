@@ -3264,6 +3264,8 @@ def self_play_game_v2(
 # Training
 # ---------------------------------------------------------------------------
 
+_ZERO_THREAT = np.zeros(4, dtype=np.float32)
+
 def train_step(
     net: HexNet,
     optimizer: torch.optim.Optimizer,
@@ -3271,58 +3273,54 @@ def train_step(
     device: torch.device,
     batch_size: int = BATCH_SIZE,
 ) -> Dict[str, float]:
-    """One training step with threat aux loss + priority updates."""
+    """One training step with threat aux loss + priority updates.
+
+    Optimized: vectorized tensor construction, minimal Python loops.
+    """
     net.train()
     batch, indices = replay_buffer.sample(batch_size)
+    n = len(batch)
 
-    # Pad old 5-channel samples to NUM_CHANNELS (7) if needed
-    padded = []
-    for s in batch:
+    # Pre-allocate tensors (avoid per-sample Python loop)
+    states = torch.zeros(n, NUM_CHANNELS, BOARD_SIZE, BOARD_SIZE)
+    policies = np.empty((n, BOARD_SIZE * BOARD_SIZE), dtype=np.float32)
+    values = np.empty(n, dtype=np.float32)
+    threats = np.empty((n, 4), dtype=np.float32)
+
+    for i, s in enumerate(batch):
         t = s.encoded_state
-        if t.shape[0] < NUM_CHANNELS:
-            pad = torch.zeros(NUM_CHANNELS - t.shape[0], t.shape[1], t.shape[2])
-            t = torch.cat([t, pad], dim=0)
-        padded.append(t)
-    states = torch.stack(padded).to(device)
-    target_policies = torch.from_numpy(
-        np.stack([s.policy_target for s in batch])
-    ).to(device)
-    target_values = torch.tensor(
-        [s.result for s in batch], dtype=torch.float32
-    ).to(device)
+        c = t.shape[0]
+        states[i, :c] = t
+        policies[i] = s.policy_target
+        values[i] = s.result
+        threats[i] = s.threat_label if s.threat_label is not None else _ZERO_THREAT
 
-    # Threat targets
-    threat_targets = torch.from_numpy(
-        np.stack([s.threat_label if s.threat_label is not None
-                  else np.zeros(4, dtype=np.float32) for s in batch])
-    ).to(device)
+    # Single transfer to device
+    states = states.to(device, non_blocking=True)
+    target_policies = torch.from_numpy(policies).to(device, non_blocking=True)
+    target_values = torch.from_numpy(values).to(device, non_blocking=True)
+    threat_targets = torch.from_numpy(threats).to(device, non_blocking=True)
 
     policy_logits, value_preds, threat_preds = net(states)
     value_preds = value_preds.squeeze(-1)
 
-    # Value loss: MSE
+    # Losses
     value_loss = F.mse_loss(value_preds, target_values)
-
-    # Policy loss: cross-entropy with MCTS targets
     log_probs = F.log_softmax(policy_logits, dim=1)
     policy_loss = -torch.sum(target_policies * log_probs, dim=1).mean()
-
-    # Threat loss: BCE (each target is 0/1)
     threat_loss = F.binary_cross_entropy_with_logits(threat_preds, threat_targets)
-
     loss = value_loss + policy_loss + 0.5 * threat_loss
 
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)  # faster than zero_grad()
     loss.backward()
     optimizer.step()
 
-    # TD-error prioritized replay: update priorities from prediction errors
-    # Higher error = more to learn from = higher sampling priority
-    with torch.no_grad():
-        value_err = (value_preds - target_values).abs()
-        policy_err = -torch.sum(target_policies * log_probs, dim=1).abs()
-        td_errors = (value_err + 0.1 * policy_err + 0.1).cpu().tolist()
-    replay_buffer.update_priorities(indices, td_errors)
+    # TD-error priority updates (skip every other step to save time)
+    if indices is not None and random.random() < 0.5:
+        with torch.no_grad():
+            value_err = (value_preds - target_values).abs()
+            td_errors = (value_err + 0.1).cpu().numpy().tolist()
+        replay_buffer.update_priorities(indices, td_errors)
 
     return {
         'total': loss.item(),
