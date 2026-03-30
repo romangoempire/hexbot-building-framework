@@ -17,11 +17,13 @@ Usage:
 
 from __future__ import annotations
 
+import copy
+import math
 import multiprocessing
 import threading
 import time
 from datetime import datetime as _dt
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import psutil
 from flask import Flask, Response, jsonify, request
@@ -143,6 +145,18 @@ class DataStore:
             else:
                 self._iter_wins[2] += 1
             self._iter_lengths.append(len(moves))
+            # Auto-ELO: update every 10 games from running win rate
+            if self.total_games % 10 == 0 and self.total_games >= 10:
+                total_w = self._iter_wins[0] + self._iter_wins[1]
+                if total_w > 0:
+                    wr = self._iter_wins[0] / total_w
+                    wr = max(0.01, min(0.99, wr))
+                    elo = 1000 + 400 * math.log10(wr / (1 - wr))
+                    self.current_elo = round(elo, 1)
+                    self.elo_history.append({
+                        "iteration": self.current_iteration or self.total_games,
+                        "elo": self.current_elo,
+                    })
             return entry
 
     def recent_games(self, n: int = 10) -> List[dict]:
@@ -243,6 +257,62 @@ class DataStore:
 
 
 # ---------------------------------------------------------------------------
+# Bot vault - stores snapshots for auto-ELO
+# ---------------------------------------------------------------------------
+
+class BotVault:
+    """Stores bot snapshots over time for generational ELO evaluation."""
+
+    def __init__(self, max_snapshots: int = 20):
+        self.snapshots: List[tuple] = []  # [(game_idx, bot_fn)]
+        self.max_snapshots = max_snapshots
+
+    def snapshot(self, game_idx: int, bot_fn) -> None:
+        """Store a snapshot of the bot at this point in training."""
+        # Wrap in lambda to capture current state
+        self.snapshots.append((game_idx, bot_fn))
+        if len(self.snapshots) > self.max_snapshots:
+            # Keep first + evenly spaced + last
+            n = len(self.snapshots)
+            step = max(1, n // self.max_snapshots)
+            keep = {0, n - 1}
+            for i in range(0, n, step):
+                keep.add(i)
+            self.snapshots = [self.snapshots[i] for i in sorted(keep)]
+
+    @property
+    def latest(self):
+        return self.snapshots[-1][1] if self.snapshots else None
+
+    def __len__(self):
+        return len(self.snapshots)
+
+
+def _call_bot(bot, game):
+    """Call a bot (function or object with best_move) and return (q, r)."""
+    if hasattr(bot, 'best_move'):
+        return bot.best_move(game)
+    return bot(game)
+
+
+def _play_one_game(bot_p0, bot_p1):
+    """Play a single game between two bots. Returns (moves, result, winner).
+    result: +1.0 if P0 wins, -1.0 if P1 wins, 0.0 draw."""
+    from hexbot import HexGame
+    game = HexGame()
+    moves = []
+    while not game.is_over:
+        bot = bot_p0 if game.current_player == 0 else bot_p1
+        move = _call_bot(bot, game)
+        moves.append(list(move))
+        game.place(*move)
+    if game.winner is None:
+        return moves, 0.0, None
+    result = 1.0 if game.winner == 0 else -1.0
+    return moves, result, game.winner
+
+
+# ---------------------------------------------------------------------------
 # Dashboard class (Python API)
 # ---------------------------------------------------------------------------
 
@@ -263,6 +333,7 @@ class Dashboard:
         self.host = host
         self.store = DataStore()
         self.resource_monitor = ResourceMonitor()
+        self._vault = BotVault()
         self.app = Flask(__name__)
         self.app.config["SECRET_KEY"] = "hexbot-dashboard"
         self.socketio = SocketIO(
@@ -321,6 +392,123 @@ class Dashboard:
             "pct": pct,
             "phase": phase,
         })
+
+    # -- Arena & Training --
+
+    def run_arena(self, bot1, bot2, games: int = 100,
+                  background: bool = True) -> None:
+        """Play bot1 vs bot2, stream games and auto-compute ELO.
+
+        Args:
+            bot1: function(game)->(q,r) or object with best_move(game).
+            bot2: same.
+            games: number of games to play.
+            background: run in background thread (default True).
+        """
+        def _run():
+            for g in range(games):
+                # Alternate who goes first
+                if g % 2 == 0:
+                    moves, result, _ = _play_one_game(bot1, bot2)
+                else:
+                    moves, result, _ = _play_one_game(bot2, bot1)
+                    result = -result  # flip so bot1 is always "P0"
+                self.add_game(moves, result)
+                self.update_progress(g + 1, games, phase='arena')
+        if background:
+            threading.Thread(target=_run, daemon=True).start()
+        else:
+            _run()
+
+    def train(self, bot, iterations: int = 100, games_per_iter: int = 20,
+              opponent=None, eval_every: int = 5, eval_games: int = 10,
+              snapshot_every: int = 3, background: bool = True) -> None:
+        """Full training loop with auto-ELO via bot snapshots.
+
+        The dashboard plays self-play games, snapshots the bot periodically,
+        and runs ELO evaluations against past versions automatically.
+
+        Args:
+            bot: function(game)->(q,r) or object with best_move(game).
+            iterations: number of training iterations.
+            games_per_iter: self-play games per iteration.
+            opponent: opponent for self-play (default: bot plays itself).
+            eval_every: run ELO evaluation every N iterations.
+            eval_games: games per ELO evaluation.
+            snapshot_every: snapshot bot every N iterations.
+            background: run in background thread (default True).
+        """
+        def _run():
+            opp = opponent
+            for it in range(1, iterations + 1):
+                t0 = time.time()
+                wins = [0, 0, 0]
+                lengths = []
+                p0 = bot
+                p1 = opp if opp is not None else bot
+
+                # Self-play
+                for g in range(games_per_iter):
+                    moves, result, _ = _play_one_game(p0, p1)
+                    self.add_game(moves, result)
+                    lengths.append(len(moves))
+                    if result > 0: wins[0] += 1
+                    elif result < 0: wins[1] += 1
+                    else: wins[2] += 1
+                    self.update_progress(g + 1, games_per_iter, phase='self-play')
+
+                sp_time = time.time() - t0
+                avg_len = round(sum(lengths) / len(lengths)) if lengths else 0
+
+                # Snapshot bot for ELO
+                if snapshot_every and it % snapshot_every == 0:
+                    self._vault.snapshot(self.store.total_games, bot)
+
+                # ELO evaluation against past version
+                elo = None
+                if eval_every and it % eval_every == 0 and len(self._vault) >= 2:
+                    elo = self._auto_elo_eval(bot, eval_games)
+                    self.update_progress(eval_games, eval_games, phase='elo-eval')
+
+                self.add_metric(
+                    iteration=it, wins=wins, games=games_per_iter,
+                    avg_game_length=avg_len, self_play_time=round(sp_time, 1),
+                    elo=elo, workers=1,
+                )
+
+        if background:
+            threading.Thread(target=_run, daemon=True).start()
+        else:
+            _run()
+
+    def _auto_elo_eval(self, current_bot, num_games: int = 10) -> float:
+        """Play current bot vs last snapshot, return ELO estimate."""
+        past_bot = self._vault.snapshots[-2][1] if len(self._vault) >= 2 else self._vault.latest
+        if past_bot is None:
+            return self.store.current_elo
+
+        wins = 0
+        for g in range(num_games):
+            if g % 2 == 0:
+                _, result, _ = _play_one_game(current_bot, past_bot)
+            else:
+                _, result, _ = _play_one_game(past_bot, current_bot)
+                result = -result
+            if result > 0:
+                wins += 1
+            self.update_progress(g + 1, num_games, phase='elo-eval')
+
+        wr = wins / max(num_games, 1)
+        wr = max(0.01, min(0.99, wr))
+        elo_delta = 400 * math.log10(wr / (1 - wr))
+        new_elo = round(self.store.current_elo + elo_delta * 0.3, 1)  # smooth update
+        self.store.current_elo = new_elo
+        self.store.elo_history.append({
+            "iteration": self.store.current_iteration,
+            "elo": new_elo,
+        })
+        self.socketio.emit("stats_update", self.store.get_stats())
+        return new_elo
 
     # -- Routes --
 

@@ -315,41 +315,54 @@ A live training dashboard that visualizes games, tracks ELO, loss curves, and mo
 ### Quick Start
 
 ```bash
-python test_dashboard.py       # test the UI with fake data (port 5002)
+python test_dashboard.py       # real bot games on port 5002
 ```
 
-### Use with Framework Bots
+### Arena (2 lines)
 
-Feed game results from an Arena into the dashboard:
+Pit any two bots against each other. ELO is computed automatically from results.
 
 ```python
-from hexbot import HexGame, Bot, Arena
+from hexbot import Bot
 from dashboard import Dashboard
 
 dash = Dashboard(port=5001)
 dash.start()
 
-bot_a = Bot.heuristic()
-bot_b = Bot.heuristic()
-
-for iteration in range(100):
-    for g in range(10):
-        game = HexGame()
-        moves = []
-        while not game.is_over:
-            bot = bot_a if game.current_player == 0 else bot_b
-            move = bot.best_move(game)
-            moves.append(list(move))
-            game.place(*move)
-        result = 1.0 if game.winner == 0 else -1.0
-        dash.add_game(moves, result)
-
-    dash.add_metric(iteration=iteration, elo=1000 + iteration * 2)
+# One line - dashboard handles everything: games, ELO, charts
+dash.run_arena(Bot.heuristic(), Bot.random(), games=100)
 ```
+
+### Training Loop (auto-ELO via snapshots)
+
+The dashboard stores snapshots of your bot over time and automatically plays the current version against past versions to compute ELO. You don't have to do anything.
+
+```python
+from hexbot import Bot
+from dashboard import Dashboard
+
+dash = Dashboard(port=5001)
+dash.start()
+
+# Dashboard runs self-play, snapshots the bot, auto-computes ELO
+dash.train(Bot.heuristic(), iterations=50, games_per_iter=20)
+```
+
+Parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `bot` | required | function(game)->(q,r) or object with best_move(game) |
+| `iterations` | 100 | Number of training iterations |
+| `games_per_iter` | 20 | Self-play games per iteration |
+| `opponent` | None | Opponent for self-play (default: bot plays itself) |
+| `eval_every` | 5 | Run ELO evaluation every N iterations |
+| `eval_games` | 10 | Games per ELO evaluation |
+| `snapshot_every` | 3 | Snapshot bot every N iterations for ELO |
 
 ### Use with Your Own Bot
 
-Any code that produces games can feed the dashboard -just call `add_game()`:
+Any function that takes a game and returns a move works:
 
 ```python
 from dashboard import Dashboard
@@ -357,12 +370,21 @@ from dashboard import Dashboard
 dash = Dashboard(port=5001)
 dash.start()
 
-# Your training loop
-for i in range(1000):
-    moves, result = my_training_function()  # your code
-    dash.add_game(moves, result)
-    dash.add_metric(iteration=i, loss=my_loss, elo=my_elo)
-    dash.update_progress(step=i, total=1000, loss=my_loss)
+def my_bot(game):
+    # your logic here
+    return (0, 0)
+
+dash.train(my_bot, iterations=50)  # auto-ELO, auto-charts, auto-everything
+```
+
+### Manual Control
+
+For full control, push games and metrics yourself. ELO is still auto-computed from win rates.
+
+```python
+dash.add_game(moves=[[0,0],[1,0]], result=1.0)   # ELO auto-updates
+dash.add_metric(iteration=1, loss=0.5)             # charts auto-update
+dash.update_progress(step=50, total=100)           # progress bar
 ```
 
 ### REST API
