@@ -379,54 +379,67 @@ dash.train(my_bot, iterations=50)  # auto-ELO, auto-charts, auto-everything
 
 ### Manual Control
 
-For full control, push games and metrics yourself. ELO is still auto-computed from win rates.
+For full control, push games and metrics yourself:
 
 ```python
-dash.add_game(moves=[[0,0],[1,0]], result=1.0)   # ELO auto-updates
-dash.add_metric(iteration=1, loss=0.5)             # charts auto-update
-dash.update_progress(step=50, total=100)           # progress bar
+dash.add_game(moves=[[0,0],[1,0]], result=1.0)
+dash.add_metric(iteration=1, loss=0.5, elo=1050)
+dash.update_progress(step=50, total=100)
 ```
 
-### REST API
+### Any Language (REST API)
 
-Push data from any language or process via HTTP:
+The dashboard is a standard HTTP server. Any language that can send JSON over HTTP works. Start the dashboard with `python dashboard.py` (or from Python), then push data from anywhere:
 
+**curl:**
 ```bash
-# Submit a game
 curl -X POST http://localhost:5001/api/game \
   -H 'Content-Type: application/json' \
   -d '{"moves": [[0,0],[1,0],[0,1],[2,0]], "result": 1.0}'
 
-# Submit metrics
 curl -X POST http://localhost:5001/api/metric \
   -H 'Content-Type: application/json' \
   -d '{"iteration": 5, "loss": {"total": 0.82}, "elo": 1100}'
-
-# Read stats
-curl http://localhost:5001/api/stats
-curl http://localhost:5001/api/elo
-curl http://localhost:5001/api/games
 ```
 
-### WebSocket API
+**Rust:**
+```rust
+let client = reqwest::Client::new();
+client.post("http://localhost:5001/api/game")
+    .json(&serde_json::json!({
+        "moves": [[0,0],[1,0],[0,1]],
+        "result": 1.0
+    }))
+    .send().await?;
+```
 
-Connect via Socket.IO for real-time streaming:
+**C++:**
+```cpp
+// Using cpr (C++ Requests)
+cpr::Post(cpr::Url{"http://localhost:5001/api/game"},
+    cpr::Header{{"Content-Type", "application/json"}},
+    cpr::Body{R"({"moves":[[0,0],[1,0]],"result":1.0})"});
+```
+
+**JavaScript / Node.js:**
+```javascript
+fetch('http://localhost:5001/api/game', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ moves: [[0,0],[1,0]], result: 1.0 })
+});
+```
+
+### WebSocket API (real-time)
+
+For streaming data, connect via Socket.IO:
 
 ```javascript
 const socket = io('http://localhost:5001');
 
-// Send a game result
-socket.emit('game_result', {
-  moves: [[0,0],[1,0],[0,1]],
-  result: 1.0
-});
-
-// Send metrics
-socket.emit('metric', {
-  iteration: 5,
-  loss: { total: 0.82 },
-  elo: 1100
-});
+// Push data
+socket.emit('game_result', { moves: [[0,0],[1,0]], result: 1.0 });
+socket.emit('metric', { iteration: 5, loss: { total: 0.82 }, elo: 1100 });
 
 // Listen for updates
 socket.on('game_complete', d => console.log('Game:', d));
@@ -1114,6 +1127,7 @@ The full project (not included in this framework repo) includes a Playwright-bas
 | `examples/dashboard_arena.py` | Dashboard | Watch two bots play with live ELO tracking |
 | `examples/dashboard_train.py` | Dashboard | Train with auto-ELO via bot snapshots |
 | `examples/dashboard_custom_bot.py` | Dashboard | Plug your own bot function into the dashboard |
+| `test_dashboard.py` | Evolution + Dashboard | Full evolutionary bot demo with live visualization |
 
 ## Advanced: Speedup Techniques
 
