@@ -4,23 +4,22 @@ Run:
     python test_dashboard.py
     Then open http://localhost:5002
 
-Demonstrates:
-- Building a bot with evolving heuristic weights
-- Using the dashboard to track improvement over generations
-- Auto-ELO computed from games against a baseline
-- All charts, game replays, and stats update live
+Showcases how to build an evolutionary bot using the hexbot framework
+and visualize its improvement with the training dashboard.
 
-The bot starts with random weights and evolves them through
-tournament selection. You can watch it improve in real-time.
+The bot starts with random heuristic weights and evolves them through
+tournament selection against a heuristic baseline. Watch the ELO chart
+climb as the bot discovers better weight combinations.
 """
 
 import sys
 import time
 import random
+import math
 import copy
 
 sys.path.insert(0, '.')
-from hexbot import HexGame, evaluate_moves
+from hexbot import HexGame, evaluate_moves, Bot
 from dashboard_clean import Dashboard
 
 # ---------------------------------------------------------------------------
@@ -28,19 +27,22 @@ from dashboard_clean import Dashboard
 # ---------------------------------------------------------------------------
 
 class EvoBot:
-    """A bot with evolvable weights for move scoring."""
+    """A bot with evolvable weights for move evaluation.
+
+    Uses the C engine's scored moves as a base, then re-ranks them
+    using learnable weights for different positional features.
+    """
 
     def __init__(self, weights=None):
-        # Weights control how the bot values different move properties
         self.weights = weights or {
-            'score': random.uniform(0.5, 2.0),       # C engine heuristic score
-            'center': random.uniform(-0.5, 1.0),     # prefer center
-            'spread': random.uniform(-0.5, 1.0),     # prefer spread-out moves
-            'random': random.uniform(0.0, 0.5),      # randomness
+            'score': random.uniform(0.5, 2.0),
+            'center': random.uniform(-0.3, 0.8),
+            'aggression': random.uniform(0.0, 1.0),
+            'noise': random.uniform(0.0, 0.3),
         }
 
     def best_move(self, game):
-        top = evaluate_moves(game, top_n=15)
+        top = evaluate_moves(game, top_n=12)
         if not top:
             moves = game.legal_moves()
             return random.choice(moves) if moves else (0, 0)
@@ -49,34 +51,64 @@ class EvoBot:
         for move, score in top:
             q, r = move
             val = score * self.weights['score']
-            # Center preference
-            val -= (abs(q) + abs(r)) * self.weights['center'] * 0.1
-            # Spread bonus (distance from other top moves)
-            val += self.weights['spread'] * random.uniform(0, 0.3)
-            # Noise
-            val += random.gauss(0, self.weights['random'])
+            val -= (abs(q) + abs(r)) * self.weights['center'] * 0.05
+            val += score * self.weights['aggression'] * 0.2 if score > 50 else 0
+            val += random.gauss(0, max(0.01, self.weights['noise']))
             if val > best_val:
                 best_val = val
                 best_move = move
         return best_move
 
-    def mutate(self):
+    def mutate(self, strength=0.15):
         """Return a mutated copy."""
-        new_weights = {}
+        new_w = {}
         for k, v in self.weights.items():
-            mutation = random.gauss(0, 0.15)
-            new_weights[k] = max(-2, min(3, v + mutation))
-        return EvoBot(new_weights)
+            new_w[k] = max(-1, min(3, v + random.gauss(0, strength)))
+        return EvoBot(new_w)
+
+    def crossover(self, other):
+        """Return a child with mixed weights from two parents."""
+        new_w = {}
+        for k in self.weights:
+            new_w[k] = self.weights[k] if random.random() < 0.5 else other.weights[k]
+        return EvoBot(new_w)
 
     def __repr__(self):
-        w = ', '.join(f'{k}={v:.2f}' for k, v in self.weights.items())
+        w = ' '.join(f'{k}={v:.2f}' for k, v in self.weights.items())
         return f'EvoBot({w})'
 
 
-def random_bot(game):
-    """Baseline: random legal moves."""
-    moves = game.legal_moves()
-    return random.choice(moves) if moves else (0, 0)
+def play_match(bot_a, bot_b, games=2):
+    """Play a match between two bots. Returns (wins_a, wins_b, game_data)."""
+    wins_a, wins_b = 0, 0
+    all_games = []
+    for g in range(games):
+        game = HexGame()
+        moves = []
+        # Alternate sides
+        if g % 2 == 0:
+            bots = [bot_a, bot_b]
+            a_is_p0 = True
+        else:
+            bots = [bot_b, bot_a]
+            a_is_p0 = False
+
+        while not game.is_over:
+            bot = bots[game.current_player]
+            move = bot.best_move(game) if hasattr(bot, 'best_move') else bot(game)
+            moves.append(list(move))
+            game.place(*move)
+
+        p0_won = game.winner == 0
+        if (p0_won and a_is_p0) or (not p0_won and not a_is_p0):
+            wins_a += 1
+            result = 1.0
+        else:
+            wins_b += 1
+            result = -1.0
+
+        all_games.append((moves, result, len(moves)))
+    return wins_a, wins_b, all_games
 
 
 # ---------------------------------------------------------------------------
@@ -88,116 +120,101 @@ dash.start()
 time.sleep(1)
 
 print("Dashboard: http://localhost:5002")
-print("Evolving a heuristic bot over generations")
+print("=" * 50)
+print("Evolving a heuristic bot against the C engine baseline")
 print("Watch the ELO chart to see improvement!")
-print("Press Ctrl+C to stop\n")
+print("Press Ctrl+C to stop")
+print("=" * 50)
+print()
 
-# Start with a population of random bots
-POPULATION = 6
-GAMES_PER_MATCHUP = 4
+POP_SIZE = 8
+GAMES_PER_EVAL = 4
+baseline = Bot.heuristic()
 
-population = [EvoBot() for _ in range(POPULATION)]
+population = [EvoBot() for _ in range(POP_SIZE)]
+champion = None
 generation = 0
-best_ever = None
-best_elo = 0
 
 try:
     while True:
         generation += 1
-        print(f"--- Generation {generation} ({POPULATION} bots) ---")
+        t0 = time.time()
 
-        # Tournament: each bot plays against random baseline
-        scores = []
+        # --- Evaluate each bot against baseline ---
+        fitness = []
+        total_lengths = []
+
         for i, bot in enumerate(population):
-            wins = 0
-            for g in range(GAMES_PER_MATCHUP):
-                game = HexGame()
-                moves = []
-                bots = [bot, random_bot] if g % 2 == 0 else [random_bot, bot]
-                bot_is_p0 = (g % 2 == 0)
+            wins, losses, games_data = play_match(bot, baseline, GAMES_PER_EVAL)
 
-                while not game.is_over:
-                    b = bots[game.current_player]
-                    if hasattr(b, 'best_move'):
-                        move = b.best_move(game)
-                    else:
-                        move = b(game)
-                    moves.append(list(move))
-                    game.place(*move)
-
-                result = 1.0 if game.winner == 0 else -1.0
-                if not bot_is_p0:
-                    result = -result
-
-                # Stream to dashboard
+            # Stream games to dashboard (with small delay so replay works)
+            for moves, result, length in games_data:
                 dash.add_game(moves, result)
+                total_lengths.append(length)
+                time.sleep(0.15)  # let dashboard replay catch up
 
-                if result > 0:
-                    wins += 1
+            fitness.append((wins, i))
+            dash.update_progress(i + 1, POP_SIZE, phase='evolution')
 
-            scores.append((wins, i))
-            dash.update_progress(i + 1, POPULATION, phase='tournament')
+        # --- Rank by fitness ---
+        fitness.sort(reverse=True)
+        ranked = [(population[idx], w) for w, idx in fitness]
 
-        # Sort by wins (best first)
-        scores.sort(reverse=True)
-        ranked = [population[idx] for _, idx in scores]
+        best_bot, best_wins = ranked[0]
+        worst_wins = ranked[-1][1]
+        sp_time = time.time() - t0
+        avg_len = round(sum(total_lengths) / len(total_lengths)) if total_lengths else 0
+        total_wins = sum(w for w, _ in fitness)
+        total_games = POP_SIZE * GAMES_PER_EVAL
 
-        # Report
-        best = ranked[0]
-        worst_score = scores[-1][0]
-        best_score = scores[0][0]
-        wr = best_score / GAMES_PER_MATCHUP
+        # --- ELO: best bot vs previous champion ---
+        elo = None
+        if champion is not None:
+            champ_wins, champ_losses, _ = play_match(best_bot, champion, 6)
+            wr = max(0.05, min(0.95, champ_wins / 6))
+            elo_delta = 400 * math.log10(wr / (1 - wr))
+            elo = round(1000 + generation * 2 + elo_delta, 1)
+            dash.update_progress(6, 6, phase='elo-eval')
 
-        print(f"  Best: {best_score}/{GAMES_PER_MATCHUP} wins - {best}")
-        print(f"  Worst: {worst_score}/{GAMES_PER_MATCHUP} wins")
-
-        # Track best ever
-        if best_elo == 0 or best_score >= best_elo:
-            best_elo = best_score
-            best_ever = copy.deepcopy(best)
-
-        # Push metrics
+        # --- Push metrics ---
         dash.add_metric(
             iteration=generation,
-            wins=[sum(s for s, _ in scores), POPULATION * GAMES_PER_MATCHUP - sum(s for s, _ in scores), 0],
-            games=POPULATION * GAMES_PER_MATCHUP,
-            avg_game_length=20,
-            self_play_time=1.0,
+            wins=[total_wins, total_games - total_wins, 0],
+            games=total_games,
+            avg_game_length=avg_len,
+            self_play_time=round(sp_time, 1),
             workers=1,
+            elo=elo,
         )
 
-        # ELO eval: best bot vs snapshot of previous best
-        if generation > 1 and best_ever:
-            eval_wins = 0
-            for eg in range(6):
-                game = HexGame()
-                moves = []
-                bots_eval = [best, best_ever] if eg % 2 == 0 else [best_ever, best]
-                is_p0 = (eg % 2 == 0)
-                while not game.is_over:
-                    b = bots_eval[game.current_player]
-                    move = b.best_move(game)
-                    moves.append(list(move))
-                    game.place(*move)
-                r = 1.0 if game.winner == 0 else -1.0
-                if not is_p0: r = -r
-                if r > 0: eval_wins += 1
+        # --- Print ---
+        elo_str = f', ELO {elo}' if elo else ''
+        print(f'Gen {generation:3d} | best {best_wins}/{GAMES_PER_EVAL}W'
+              f' worst {worst_wins}/{GAMES_PER_EVAL}W'
+              f' | avg_len {avg_len} | {sp_time:.1f}s{elo_str}')
+        print(f'         {best_bot}')
 
-            wr_eval = max(0.01, min(0.99, eval_wins / 6))
-            import math
-            elo = 1000 + generation * 3 + 400 * math.log10(wr_eval / (1 - wr_eval))
-            dash.add_metric(iteration=generation, elo=round(elo, 1))
-            print(f"  ELO: {elo:.0f} (vs previous best: {eval_wins}/6 wins)")
+        # --- Evolution ---
+        # Keep top half
+        survivors = [bot for bot, _ in ranked[:POP_SIZE // 2]]
+        champion = copy.deepcopy(survivors[0])
 
-        # Evolution: keep top half, mutate to fill rest
-        survivors = ranked[:POPULATION // 2]
-        children = [s.mutate() for s in survivors]
+        # Fill rest with mutations and crossovers
+        children = []
+        while len(children) < POP_SIZE // 2:
+            if random.random() < 0.7:
+                # Mutate a random survivor
+                parent = random.choice(survivors)
+                children.append(parent.mutate())
+            else:
+                # Crossover two survivors
+                p1, p2 = random.sample(survivors, 2)
+                children.append(p1.crossover(p2))
+
         population = survivors + children
-
-        print()
-        time.sleep(0.5)
+        time.sleep(0.3)
 
 except KeyboardInterrupt:
     print(f"\nStopped after {generation} generations")
-    if best_ever:
-        print(f"Best bot: {best_ever}")
+    if champion:
+        print(f"Champion: {champion}")

@@ -145,18 +145,6 @@ class DataStore:
             else:
                 self._iter_wins[2] += 1
             self._iter_lengths.append(len(moves))
-            # Auto-ELO: update every 10 games from running win rate
-            if self.total_games % 10 == 0 and self.total_games >= 10:
-                total_w = self._iter_wins[0] + self._iter_wins[1]
-                if total_w > 0:
-                    wr = self._iter_wins[0] / total_w
-                    wr = max(0.01, min(0.99, wr))
-                    elo = 1000 + 400 * math.log10(wr / (1 - wr))
-                    self.current_elo = round(elo, 1)
-                    self.elo_history.append({
-                        "iteration": self.current_iteration or self.total_games,
-                        "elo": self.current_elo,
-                    })
             return entry
 
     def recent_games(self, n: int = 10) -> List[dict]:
