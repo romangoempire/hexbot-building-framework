@@ -411,18 +411,47 @@ socket.on('game_complete', d => console.log('Game:', d));
 socket.on('stats_update', d => console.log('Stats:', d));
 ```
 
+### Game Viewer
+
+The left panel shows an animated replay of training games with numbered moves (black hexagons for P0, white hatched hexagons for P1). Gray dots show empty hex positions around the stones.
+
+**Keyboard shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| `Space` | Pause / resume auto-advance |
+| `Right arrow` | Step forward one move (pauses auto-advance) |
+| `Left arrow` | Step backward one move |
+| `R` | Restart current game from the beginning |
+
+When you use arrow keys to step through moves, auto-advance pauses so you can analyze the position. Press Space to resume.
+
+The game history bar below the board shows recent games. Click any game to re-watch it.
+
 ### Settings
 
-Click the gear icon (&#9881;) in the header to adjust:
+Click the gear icon in the header to adjust:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Replay speed | 120ms | Speed of game replay animation |
 | Dot size | 2 | Size of empty hex grid dots |
 | Grid radius | 2 | How many empty hexes shown around stones |
+| Move numbers | On | Show move order numbers on stones |
 | Auto-refresh | On | Periodically refresh charts |
 
 All settings are saved to your browser's localStorage.
+
+### Charts
+
+The right panel has 6 collapsible chart panels. Click any header to collapse/expand:
+
+- **ELO Progression** - rating over iterations
+- **Loss Curves** - total, value, and policy loss
+- **Win Rates** - P0 vs P1 win percentages
+- **Game Length** - average moves per game
+- **Training Speed** - games per second
+- **Resources** - CPU and RAM usage
 
 ### Available Endpoints
 

@@ -794,63 +794,107 @@ function drawHex() {
 let replayTimer = null, replayBusy = false, pendingGame = null;
 let gameStats = { w0: 0, w1: 0, totalLen: 0, count: 0 };
 
+// Shared replay state for keyboard stepping
+let replayPaused = false, currentGameData = null, replayMoveIdx = 0;
+
+// Rebuild board state from moves up to index n
+function rebuildBoard(moves, n) {
+  stones0 = []; stones1 = []; moveOrder = [];
+  let p = 0, stt = 0;
+  for (let i = 0; i < n; i++) {
+    const m = moves[i];
+    if (p === 0) stones0.push(m); else stones1.push(m);
+    moveOrder.push({ q: m[0], r: m[1], num: i + 1, player: p });
+    stt++;
+    const need = (i === 0) ? 1 : 2;
+    if (stt >= need) { p = 1 - p; stt = 0; }
+  }
+}
+
+function replayAdvance() {
+  if (!currentGameData) return;
+  const d = currentGameData, moves = d.moves;
+  if (replayMoveIdx >= moves.length) {
+    // Game finished
+    if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+    const winner = d.result > 0 ? 'P0 (black)' : 'P1 (white)';
+    setInfo('Game #' + d.game_idx + ': ' + winner + ' wins in ' + moves.length + ' moves');
+    setTimeout(() => {
+      replayBusy = false;
+      if (!replayPaused && pendingGame) { const g = pendingGame; pendingGame = null; replayGame(g); }
+    }, 800);
+    return;
+  }
+  replayMoveIdx++;
+  rebuildBoard(moves, replayMoveIdx);
+  drawHex();
+  setInfo('Game #' + d.game_idx + ' \u2014 Move ' + replayMoveIdx + '/' + moves.length +
+    (replayPaused ? ' [PAUSED]' : ''));
+}
+
 function replayGame(d) {
   replayBusy = true;
   replayPaused = false;
   currentGameData = d;
+  replayMoveIdx = 0;
   stones0 = []; stones1 = []; moveOrder = [];
   drawHex();
   el('game-num').textContent = d.game_idx;
-  let mi = 0, curPlayer = 0, stonesInTurn = 0;
-  const moves = d.moves;
-  setInfo('Game #' + d.game_idx + ' playing... (' + moves.length + ' moves)');
-  replayTimer = setInterval(() => {
-    if (mi >= moves.length) {
-      clearInterval(replayTimer); replayTimer = null;
-      const winner = d.result > 0 ? 'P0 (black)' : 'P1 (white)';
-      setInfo('Game #' + d.game_idx + ': ' + winner + ' wins in ' + moves.length + ' moves');
-      setTimeout(() => {
-        replayBusy = false;
-        if (pendingGame) { const g = pendingGame; pendingGame = null; replayGame(g); }
-      }, 800);
-      return;
-    }
-    const m = moves[mi];
-    if (curPlayer === 0) stones0.push(m); else stones1.push(m);
-    moveOrder.push({ q: m[0], r: m[1], num: mi + 1, player: curPlayer });
-    mi++; stonesInTurn++;
-    // Turn structure: first move is 1 stone, then 2 each
-    const needed = (mi <= 1) ? 1 : 2;
-    if (stonesInTurn >= needed) { curPlayer = 1 - curPlayer; stonesInTurn = 0; }
-    drawHex();
-    setInfo('Game #' + d.game_idx + ' \u2014 Move ' + mi + '/' + moves.length);
-  }, settings.replaySpeed);
+  setInfo('Game #' + d.game_idx + ' playing... (' + d.moves.length + ' moves)');
+  if (replayTimer) clearInterval(replayTimer);
+  replayTimer = setInterval(replayAdvance, settings.replaySpeed);
 }
 
 // ---------------------------------------------------------------------------
-// Pause / step / keyboard controls
+// Keyboard controls
 // ---------------------------------------------------------------------------
-let replayPaused = false, currentGameData = null;
-
 document.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
-  if (e.code === 'KeyR' && currentGameData) { replayGame(currentGameData); }
-});
-
-function togglePause() {
-  if (!replayTimer && !replayPaused) return;
-  if (replayPaused) {
-    // Resume
-    replayPaused = false;
-    if (currentGameData) replayGame(currentGameData);
-  } else {
-    // Pause
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (replayPaused) {
+      // Resume auto-advance
+      replayPaused = false;
+      if (currentGameData && replayMoveIdx < currentGameData.moves.length) {
+        if (replayTimer) clearInterval(replayTimer);
+        replayTimer = setInterval(replayAdvance, settings.replaySpeed);
+      }
+      setInfo(el('game-info').textContent.replace(' [PAUSED]', ''));
+    } else {
+      // Pause
+      replayPaused = true;
+      if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+      setInfo(el('game-info').textContent + ' [PAUSED]');
+    }
+  }
+  if (e.code === 'ArrowRight' && currentGameData) {
+    e.preventDefault();
+    // Pause auto-advance and step forward
     replayPaused = true;
     if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
-    setInfo(el('game-info').textContent + ' [PAUSED]');
+    if (replayMoveIdx < currentGameData.moves.length) {
+      replayMoveIdx++;
+      rebuildBoard(currentGameData.moves, replayMoveIdx);
+      drawHex();
+      setInfo('Game #' + currentGameData.game_idx + ' \u2014 Move ' + replayMoveIdx + '/' + currentGameData.moves.length + ' [PAUSED]');
+    }
   }
-}
+  if (e.code === 'ArrowLeft' && currentGameData) {
+    e.preventDefault();
+    // Pause auto-advance and step backward
+    replayPaused = true;
+    if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
+    if (replayMoveIdx > 0) {
+      replayMoveIdx--;
+      rebuildBoard(currentGameData.moves, replayMoveIdx);
+      drawHex();
+      setInfo('Game #' + currentGameData.game_idx + ' \u2014 Move ' + replayMoveIdx + '/' + currentGameData.moves.length + ' [PAUSED]');
+    }
+  }
+  if (e.code === 'KeyR' && currentGameData) {
+    replayGame(currentGameData);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Game history
