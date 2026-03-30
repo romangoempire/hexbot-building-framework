@@ -1,14 +1,14 @@
-# hexbot — Build AI Bots for Hexagonal Connect-6
+# hexbot - Build AI Bots for Hexagonal Connect-6
 
-A Python framework for building bots for [Hexagonal Tic-Tac-Toe](https://hexo.did.science) (Connect-6 on an infinite hex grid). Provides a fast C game engine, analysis tools, and optional neural network training — use any AI approach you want.
+A Python framework for building bots for [Hexagonal Tic-Tac-Toe](https://hexo.did.science) (Connect-6 on an infinite hex grid). Provides a fast C game engine, analysis tools, and optional neural network training - use any AI approach you want.
 
 ---
 
 ## Table of Contents
 
 - [Installation](#installation)
-- [Quick Start](#quick-start)
 - [Game Rules](#game-rules)
+- [Quick Start](#quick-start)
 - [Building Your First Bot](#building-your-first-bot)
 - [Six Bot Approaches (End-to-End)](#six-bot-approaches-end-to-end)
   - [1. Hand-Tuned Evaluation](#approach-1-hand-tuned-evaluation)
@@ -42,6 +42,26 @@ python benchmark.py # runs performance benchmarks
 ```
 
 ---
+
+
+## Game Rules
+
+Hexagonal Connect-6 is played on an infinite hexagonal grid using axial coordinates `(q, r)`.
+
+| Rule | Detail |
+|------|--------|
+| **Board** | Infinite hexagonal grid |
+| **Players** | 2 players (Player 0 and Player 1), alternating turns |
+| **First turn** | Player 0 places 1 stone at any position |
+| **Subsequent turns** | Each player places 2 stones per turn |
+| **Win condition** | 6 consecutive stones in a straight line |
+| **Line directions** | Three axes: (1,0) horizontal, (0,1) vertical, (1,-1) diagonal |
+| **Placement** | Any empty hex within range of existing stones |
+
+The coordinate system uses axial coordinates where `q` runs along the horizontal axis and `r` runs diagonally. Every hex has six neighbors. The third implicit coordinate `s = -q - r` completes the cube coordinate system.
+
+---
+
 
 ## Quick Start
 
@@ -97,7 +117,7 @@ print(game.current_player)    # 1
 print(game.total_stones)      # 5
 ```
 
-The `stones_this_turn` and `stones_per_turn` properties tell you where you are in the current turn. This matters for bots because the two stones in a turn should work together — the first stone sets up the second.
+The `stones_this_turn` and `stones_per_turn` properties tell you where you are in the current turn. This matters for bots because the two stones in a turn should work together - the first stone sets up the second.
 
 ```python
 print(game.stones_this_turn)  # 0 (haven't placed yet this turn)
@@ -108,7 +128,7 @@ print(game.stones_this_turn)  # 1 (placed 1 of 2)
 
 #### Exploring Moves Without Committing
 
-The `place()` and `undo()` pattern lets you try moves and take them back. This is essential for search algorithms — you explore a move, evaluate the resulting position, then undo to try the next move. No board copying needed.
+The `place()` and `undo()` pattern lets you try moves and take them back. This is essential for search algorithms - you explore a move, evaluate the resulting position, then undo to try the next move. No board copying needed.
 
 ```python
 game = HexGame()
@@ -130,7 +150,7 @@ game.undo()
 print(f"Move A scored {score_a}, Move B scored {score_b}")
 ```
 
-This is extremely fast — 1.4 million place/undo cycles per second on M4 Pro. The C engine stores undo information on a stack, so there is no allocation or garbage collection.
+This is extremely fast - 1.4 million place/undo cycles per second on M4 Pro. The C engine stores undo information on a stack, so there is no allocation or garbage collection.
 
 #### Reading the Board
 
@@ -227,7 +247,7 @@ game.undo()
 assert game.zhash == hash_a  # undo restores the hash exactly
 ```
 
-Two games with identical stone placements in different order may produce the same hash (transposition). This property is what makes transposition tables work — you can detect when two different move sequences reach the same position and reuse the evaluation.
+Two games with identical stone placements in different order may produce the same hash (transposition). This property is what makes transposition tables work - you can detect when two different move sequences reach the same position and reuse the evaluation.
 
 #### Putting It All Together: A Manual Game
 
@@ -287,26 +307,6 @@ Any function that takes a game and returns a `(q, r)` move works as a bot. You c
 
 ---
 
-## Game Rules
-
-Hexagonal Connect-6 is played on an infinite hexagonal grid using axial coordinates `(q, r)`.
-
-| Rule | Detail |
-|------|--------|
-| **Board** | Infinite hexagonal grid |
-| **Players** | 2 players (Player 0 and Player 1), alternating turns |
-| **First turn** | Player 0 places 1 stone at any position |
-| **Subsequent turns** | Each player places 2 stones per turn |
-| **Win condition** | 6 consecutive stones in a straight line |
-| **Line directions** | Three axes: (1,0) horizontal, (0,1) vertical, (1,-1) diagonal |
-| **Placement** | Any empty hex within range of existing stones |
-
-The coordinate system uses axial coordinates where `q` runs along the horizontal axis and `r` runs diagonally. Every hex has six neighbors. The third implicit coordinate `s = -q - r` completes the cube coordinate system.
-
-The game was created by [CBV](https://www.youtube.com/@CBV) and has an active community analyzing strategies, openings, and formations. The "triangle" opening (3 adjacent stones) is believed to be a forced win for the attacker, though this remains unproven.
-
----
-
 ## Building Your First Bot
 
 The simplest way to build a bot is a function that takes a `HexGame` and returns a move `(q, r)`:
@@ -319,7 +319,7 @@ def my_first_bot(game):
     return game.legal_moves()[0]
 ```
 
-This bot is terrible — it always picks the same move without any strategy. Let's improve it step by step.
+This bot is terrible - it always picks the same move without any strategy. Let's improve it step by step.
 
 ### Step 1: Use Heuristic Scoring
 
@@ -403,7 +403,7 @@ print(f"vs Heuristic: {result.wins[0]}W-{result.wins[1]}L")
 
 ### Approach 1: Hand-Tuned Evaluation
 
-The simplest approach — score each candidate move using domain knowledge and pick the best one. No machine learning needed. Fast to iterate and easy to understand.
+The simplest approach - score each candidate move using domain knowledge and pick the best one. No machine learning needed. Fast to iterate and easy to understand.
 
 ```python
 from hexbot import (HexGame, Arena, Bot, evaluate_moves,
@@ -508,7 +508,7 @@ for gen in range(10):
     print(f"Gen {gen+1}: score={scores[ranked[0]]}, weights={best.weights}")
 ```
 
-After 10 generations the winning weights typically converge to: high threat weight (4+), moderate line score (1.0-1.5), low center pull (0.1-0.3), and high block weight (3+). This matches human intuition — threats and blocks matter most.
+After 10 generations the winning weights typically converge to: high threat weight (4+), moderate line score (1.0-1.5), low center pull (0.1-0.3), and high block weight (3+). This matches human intuition - threats and blocks matter most.
 
 ### Approach 3: Minimax with Alpha-Beta
 
@@ -522,9 +522,9 @@ def minimax_bot(game):
     return result['best_move']
 
 # Alpha-beta returns:
-# result['best_move']  — (q, r) best move
-# result['value']      — evaluation (-1 to +1, from P0's perspective)
-# result['nodes']      — nodes searched
+# result['best_move']  - (q, r) best move
+# result['value']      - evaluation (-1 to +1, from P0's perspective)
+# result['nodes']      - nodes searched
 
 result = Arena(minimax_bot, Bot.heuristic(), num_games=20).play()
 ```
@@ -586,7 +586,7 @@ def monte_carlo_bot(game):
 result = Arena(monte_carlo_bot, Bot.heuristic(), num_games=20).play()
 ```
 
-The strength of this bot scales with the number of rollouts per move. 100 rollouts gives a rough estimate; 1000 gives reliable evaluations. The bottleneck is that random playouts don't understand strategy — they just explore randomly. To improve, you could bias the rollouts toward better moves using `scored_moves()`.
+The strength of this bot scales with the number of rollouts per move. 100 rollouts gives a rough estimate; 1000 gives reliable evaluations. The bottleneck is that random playouts don't understand strategy - they just explore randomly. To improve, you could bias the rollouts toward better moves using `scored_moves()`.
 
 ### Approach 5: Neural Network (AlphaZero-Style)
 
@@ -866,18 +866,10 @@ hexbot.py       High-level framework (Bot, Arena, train, analysis functions)
     └── examples/     Example bots demonstrating different approaches
 ```
 
-| File | Lines | What it does |
-|------|-------|-------------|
-| `hexbot.py` | 660 | Framework API: Bot, Arena, analysis functions, train() |
-| `hexgame.py` | 550 | Clean game engine wrapping the C engine via ctypes |
-| `engine.c` | 2,331 | C engine: bitboards, alpha-beta, threat detection, move scoring |
-| `bot.py` | 3,472 | Neural network (HexNet), MCTS, batched search, self-play, training |
-| `main.py` | 509 | Pure Python game engine with undo, Zobrist hashing, candidates |
-| `benchmark.py` | 254 | Performance benchmarks for the C engine |
 
 ### How the C Engine Works
 
-The game board is stored as three sets of bitboards — one per hex axis. Each row/column/diagonal of the hex grid is a 64-bit integer where set bits represent stone positions. Win detection reduces to a single expression:
+The game board is stored as three sets of bitboards - one per hex axis. Each row/column/diagonal of the hex grid is a 64-bit integer where set bits represent stone positions. Win detection reduces to a single expression:
 
 ```c
 (bits & (bits >> 1) & (bits >> 2) & (bits >> 3) & (bits >> 4) & (bits >> 5)) != 0
@@ -885,7 +877,7 @@ The game board is stored as three sets of bitboards — one per hex axis. Each r
 
 This checks for 6 consecutive bits in ~15 integer operations, compared to nested Python loops that would require dozens of dictionary lookups.
 
-Candidate tracking uses pre-allocated arrays instead of Python sets, eliminating all garbage collection in the hot path. Every undo operation is a stack pop — no object creation or copying.
+Candidate tracking uses pre-allocated arrays instead of Python sets, eliminating all garbage collection in the hot path. Every undo operation is a stack pop - no object creation or copying.
 
 ---
 
@@ -897,7 +889,7 @@ Axial coordinates `(q, r)` where `q` is the horizontal axis and `r` is the diago
 
 ### Why is the board infinite?
 
-The real game has no fixed boundaries — stones can be placed anywhere within 8 hexes of existing stones. The C engine uses a 31x31 internal array (centered at the origin) which covers most practical games. If play extends beyond this, stones near the edges may not be tracked correctly, but this is extremely rare in real games.
+The real game has no fixed boundaries - stones can be placed anywhere within 8 hexes of existing stones. The C engine uses a 31x31 internal array (centered at the origin) which covers most practical games. If play extends beyond this, stones near the edges may not be tracked correctly, but this is extremely rare in real games.
 
 ### Can I use GPU for training?
 
@@ -935,7 +927,7 @@ The full project (not included in this framework repo) includes a Playwright-bas
 
 ### Batched Neural Network Evaluation
 
-When using a neural network for position evaluation inside alpha-beta search, the naive approach calls Python from C for every leaf node — about 600 microseconds per call due to ctypes overhead. With thousands of leaves per move, this dominates search time.
+When using a neural network for position evaluation inside alpha-beta search, the naive approach calls Python from C for every leaf node - about 600 microseconds per call due to ctypes overhead. With thousands of leaves per move, this dominates search time.
 
 The framework includes a batched evaluation system that eliminates this bottleneck. Instead of calling Python once per leaf, the C engine collects all leaf positions into a buffer during the first search pass, Python evaluates them all in a single GPU batch, and the C engine re-searches with the cached values.
 
@@ -958,7 +950,7 @@ The two-phase approach works like this:
 
 3. **Phase 3 (Re-search):** C alpha-beta runs again. This time leaf positions hit the NN cache instead of using the heuristic, producing much better move ordering and pruning.
 
-This gives 5-10x speedup over the callback approach because there are zero Python-C transitions during search — just two bulk data transfers plus two search invocations.
+This gives 5-10x speedup over the callback approach because there are zero Python-C transitions during search - just two bulk data transfers plus two search invocations.
 
 ### MCTS with Virtual Loss Batching
 
@@ -988,7 +980,7 @@ The C engine's `board_get_scored_moves()` function provides fast heuristic move 
 
 ## Contributing
 
-Built for the Hexagonal Tic-Tac-Toe community. Contributions welcome — especially new example bots, performance improvements, and documentation.
+Built for the Hexagonal Tic-Tac-Toe community. Contributions welcome - especially new example bots, performance improvements, and documentation.
 
 ## License
 
