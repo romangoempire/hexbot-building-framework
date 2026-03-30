@@ -978,6 +978,102 @@ MCTS normally evaluates the same position multiple times when reached through di
 
 The C engine's `board_get_scored_moves()` function provides fast heuristic move ordering that benefits any search algorithm. Moves are scored by line extension potential, blocking value, and proximity. When used as the first pass before NN evaluation, it ensures the most promising moves are searched first, improving alpha-beta cutoff rates and MCTS convergence.
 
+## Using the Pre-trained Model and Replay Buffer
+
+The repo includes a pre-trained checkpoint and a compressed replay buffer so you can start playing or continue training immediately without starting from scratch.
+
+### Loading the Pre-trained Bot
+
+```python
+from hexbot import Bot, Arena
+
+bot = Bot.load('pretrained.pt')
+print(bot)  # Bot(mcts, sims=200, 3,909,308 params)
+
+# Play against it
+result = Arena(bot, Bot.heuristic(), num_games=20).play()
+```
+
+The checkpoint contains a 3.9M parameter network (128 filters, 12 residual blocks) trained for 40 iterations of self-play. It includes the full optimizer state so you can resume training from where it left off.
+
+### Continuing Training from Checkpoint
+
+```python
+import torch
+from bot import create_network, BatchedMCTS, ReplayBuffer, self_play_game_v2, train_step
+
+# Load model
+net = create_network('standard')
+ckpt = torch.load('pretrained.pt', map_location='cpu', weights_only=False)
+net.load_state_dict(ckpt['model_state_dict'], strict=False)
+
+# Restore optimizer for continued training
+optimizer = torch.optim.Adam(net.parameters(), lr=0.001)
+if 'optimizer_state_dict' in ckpt:
+    try:
+        optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+    except:
+        pass  # fresh optimizer if architecture changed
+```
+
+### Using the Replay Buffer
+
+The compressed replay buffer contains ~400K training samples from 40 iterations of self-play. Decompress and load it to skip the cold-start phase:
+
+```bash
+gunzip replay_buffer.pkl.gz  # decompresses to ~2GB
+```
+
+```python
+import pickle
+
+with open('replay_buffer.pkl', 'rb') as f:
+    data = pickle.load(f)
+
+buffer_samples = data['buffer']    # list of TrainingSample objects
+priorities = data['priorities']     # sampling priorities
+
+print(f"Loaded {len(buffer_samples)} training samples")
+
+# Feed into ReplayBuffer
+from bot import ReplayBuffer
+replay_buffer = ReplayBuffer()
+for sample in buffer_samples:
+    replay_buffer.push(sample)
+```
+
+With the buffer pre-loaded, training starts producing meaningful gradient updates from iteration 1 instead of waiting 5-10 iterations to fill the buffer from scratch.
+
+## Training Configuration: Spread-Out Play
+
+By default, the training pipeline encourages the bot to explore distant stone placements (colonies, gap formations). This is controlled by several settings in `bot.py` that you can toggle:
+
+### Enable/Disable Colony Exploration
+
+In `bot.py`, the `self_play_game_v2()` function has a distant exploration mechanism that forces 20% of early moves to non-adjacent cells. To disable it (for pure MCTS-driven play), comment out or remove the `DISTANT EXPLORATION` block around line 3090.
+
+### Tuning Exploration Parameters
+
+```python
+# bot.py constants - adjust these to control exploration vs exploitation
+
+DIRICHLET_ALPHA = 0.3    # Higher = more random exploration (default 0.3)
+                          # Lower (0.03-0.1) = trust the network's policy more
+                          # Set to 0.03 for focused play, 0.3 for diverse exploration
+
+TEMP_THRESHOLD = 35       # Moves before switching to greedy play (default 35)
+                          # Lower = greedy earlier (more exploitation)
+                          # Higher = explore longer into mid-game
+```
+
+### Diversity Bonus
+
+Games where stones spread across 8+ hexes get 1.5x training priority. This teaches the network that spread-out play has value. To disable this, remove the "Diversity bonus" block near the end of `self_play_game_v2()`.
+
+### C Heuristic Blend
+
+The MCTS rollout blend uses 30% C heuristic weight for adjacent moves but only 15% for distant moves. This lets the neural network's opinion dominate for non-obvious placements while still using the fast C heuristic for tactical line-extension moves. Adjust the blend ratios in `BatchedMCTS.search()` around line 2815.
+
 ## Contributing
 
 Built for the Hexagonal Tic-Tac-Toe community. Contributions welcome - especially new example bots, performance improvements, and documentation.
