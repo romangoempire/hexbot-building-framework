@@ -672,7 +672,7 @@ const HEX_SIZE = 18;
 const S3 = Math.sqrt(3);
 
 // Settings (persisted to localStorage)
-const defaultSettings = { replaySpeed: 120, dotSize: 2, emptyHexRadius: 2, autoRefresh: true, showMoveNums: true };
+const defaultSettings = { replaySpeed: 120, dotSize: 2, emptyHexRadius: 2, autoRefresh: true, showMoveNums: false };
 let settings = Object.assign({}, defaultSettings);
 try { const s = JSON.parse(localStorage.getItem('hexdash_settings')); if (s) Object.assign(settings, s); } catch(e) {}
 function saveSetting(key, val) { settings[key] = val; localStorage.setItem('hexdash_settings', JSON.stringify(settings)); }
