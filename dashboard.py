@@ -871,12 +871,18 @@ class TrainingManager:
 
                 with ProcessPoolExecutor(max_workers=num_workers) as pool:
                     futures = []
-                    for wi, (c, pos) in enumerate(zip(chunks, chunk_positions)):
-                        if c <= 0:
-                            continue
+                    # Submit 1 game per future so results stream in as each finishes
+                    all_positions = []
+                    for c, pos in zip(chunks, chunk_positions):
+                        for gi in range(c):
+                            p = None
+                            if pos and gi < len(pos):
+                                p = [pos[gi]]
+                            all_positions.append(p)
+                    for pi, pos in enumerate(all_positions):
                         futures.append(
                             pool.submit(_self_play_worker_v2, net_state,
-                                        self._net_config, current_sims, c, pos,
+                                        self._net_config, current_sims, 1, pos,
                                         use_alphabeta=False)
                         )
                     for future in as_completed(futures):
