@@ -66,6 +66,12 @@ C_PUCT = 1.5
 # Switch this before training to choose your strategy.
 PLAY_STYLE = 'distant'   # 'distant' or 'close'
 
+# --- Distant play tuning (only used when PLAY_STYLE == 'distant') ---
+C_BLEND_ADJACENT = 0.15      # C heuristic weight for adjacent moves (was 0.30)
+C_BLEND_DISTANT  = 0.05      # C heuristic weight for far moves (was 0.15)
+DISTANT_EXPLORE_PROB = 0.25   # chance to force a far-away placement per move
+DISTANT_RANGE = (5, 9)        # how far from centroid (in hexes) to place
+
 DIRICHLET_ALPHA = 0.3 if PLAY_STYLE == 'distant' else 0.15
 DIRICHLET_EPSILON = 0.25
 NUM_SIMULATIONS = 400
@@ -2840,16 +2846,14 @@ class BatchedMCTS:
                             c_priors[(q_arr[i], r_arr[i])] = exp_scores[i] / total
                         # Blend NN + C heuristic
                         if PLAY_STYLE == 'distant':
-                            # Less C influence on distant moves so NN can explore
                             existing = _get_existing_stones(game)
                             for move in policy:
                                 c_prob = c_priors.get(move, 0.01)
                                 adj = any(abs(move[0]-s[0]) + abs(move[1]-s[1]) <= 1
                                           for s in existing) if existing else True
-                                blend = 0.3 if adj else 0.15
+                                blend = C_BLEND_ADJACENT if adj else C_BLEND_DISTANT
                                 policy[move] = (1 - blend) * policy[move] + blend * c_prob
                         else:
-                            # Classic: uniform 30% C blend for all moves
                             for move in policy:
                                 c_prob = c_priors.get(move, 0.01)
                                 policy[move] = 0.7 * policy[move] + 0.3 * c_prob
@@ -2871,11 +2875,11 @@ class BatchedMCTS:
                     elif opp_wm >= 3:
                         value = -1.0 if p == 0 else 1.0
                     elif wm >= 2:
-                        boost = 0.3 if p == 0 else -0.3
-                        value = value * 0.7 + boost
+                        boost = 0.15 if p == 0 else -0.15
+                        value = value * 0.85 + boost
                     elif opp_wm >= 2:
-                        boost = -0.3 if p == 0 else 0.3
-                        value = value * 0.7 + boost
+                        boost = -0.15 if p == 0 else 0.15
+                        value = value * 0.85 + boost
             except Exception:
                 pass
 
@@ -3143,15 +3147,23 @@ def self_play_game_v2(
         if not policy:
             break
 
-        # --- DISTANT EXPLORATION: force non-adjacent placements early ---
-        if PLAY_STYLE == 'distant' and move_count < 15 and random.random() < 0.20:
+        # --- DISTANT EXPLORATION: place stones far from existing cluster ---
+        if PLAY_STYLE == 'distant' and move_count < 15 and random.random() < DISTANT_EXPLORE_PROB:
             existing = _get_existing_stones(game)
             if existing:
-                distant = [m for m in game.legal_moves()
-                           if not any(abs(m[0]-s[0]) + abs(m[1]-s[1]) <= 1
-                                      for s in existing)]
-                if distant:
-                    forced = random.choice(distant)
+                cx = sum(s[0] for s in existing) / len(existing)
+                cy = sum(s[1] for s in existing) / len(existing)
+                far_candidates = []
+                lo, hi = DISTANT_RANGE
+                for angle_i in range(12):
+                    angle = angle_i * (math.pi / 6)
+                    for dist in range(lo, hi):
+                        q = int(round(cx + dist * math.cos(angle)))
+                        r = int(round(cy + dist * math.sin(angle)))
+                        if (q, r) not in existing:
+                            far_candidates.append((q, r))
+                if far_candidates:
+                    forced = random.choice(far_candidates)
                     policy = {forced: 1.0}
 
         # --- RESIGN THRESHOLD: stop hopeless games early ---
