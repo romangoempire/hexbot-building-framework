@@ -534,13 +534,13 @@ class DashboardObserver:
                          move_history: list, result: float,
                          num_samples: int) -> None:
         data = {
-            'game_idx': game_idx + 1,
+            'game_idx': game_idx,
             'total_games': total_games,
             'result': result,
             'num_moves': len(move_history),
             'moves': move_history,
         }
-        print(f'  │  📺 Emitting game_complete #{game_idx+1} with {len(move_history)} moves')
+        print(f'  │  📺 Emitting game_complete #{game_idx} with {len(move_history)} moves')
         self.sio.emit('game_complete', data)
 
     def on_iteration_complete(self, metrics: dict) -> None:
@@ -1694,6 +1694,9 @@ footer span{white-space:nowrap}
 <script>
 const DPR = window.devicePixelRatio || 1;
 const socket = io();
+socket.on('connect', ()=>console.log('Socket connected:', socket.id));
+socket.on('disconnect', ()=>console.log('Socket disconnected'));
+socket.onAny((event, ...args)=>console.log('Event:', event, args.length>0?('('+JSON.stringify(args[0]).substring(0,100)+')'):''));
 let stones0=[], stones1=[], candidates=[];
 
 // ─── HiDPI canvas helper ─────────────────────────────────────────────
