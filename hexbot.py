@@ -47,7 +47,7 @@ __all__ = [
     # Bot framework
     'Bot', 'BotProtocol', 'Arena', 'ArenaResult', 'train',
     # Data
-    'positions', 'load_games', 'generate_puzzles',
+    'positions', 'load_games', 'generate_puzzles', 'import_games',
 ]
 
 
@@ -556,6 +556,24 @@ def load_games(path: str):
     """
     from bot import load_human_games
     return load_human_games(path)
+
+
+def import_games(path: str, min_moves: int = 6, min_elo: int = 0,
+                 max_games: int = 999999):
+    """Import games from any format (JSONL, CSV, text).
+
+    Auto-detects format. Returns list of dicts with 'moves' and 'result'.
+    Use for SFT training or analysis.
+
+    Example:
+        games = import_games('strong_games.jsonl', min_elo=1200)
+        print(f'{len(games)} games loaded')
+        # Feed to SFT:
+        from orca.sft import sft_train, games_to_samples
+        samples = games_to_samples(games)
+    """
+    from orca.sft import import_games as _imp
+    return _imp(path, min_moves=min_moves, min_elo=min_elo, max_games=max_games)
 
 
 def generate_puzzles(n: int = 100):

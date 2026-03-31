@@ -55,11 +55,11 @@ orca = Bot.orca()
 move = orca.best_move(game)
 ```
 
-Train from scratch or continue training:
+Train from game collections or from scratch:
 ```bash
-python -m orca.train                              # train with defaults
-python -m orca.train --iterations 100 --lr 0.002  # custom params
-python -m orca.train --config orca-transformer    # experimental transformer
+python -m orca.scrape --games 1000 --output games.jsonl  # download games
+python -m orca.sft --data games.jsonl --then-selfplay 50  # SFT + self-play
+python -m orca.train --iterations 100 --lr 0.002           # pure self-play
 ```
 
 See [Orca documentation](docs/orca.md) for details.
@@ -146,6 +146,7 @@ See [Configuration reference](docs/configuration.md) for all parameters.
 | [Dashboard](docs/dashboard-guide.md) | REST API, WebSocket, keyboard shortcuts |
 | [Train Dashboard](docs/train-dashboard.md) | Web UI for Orca training pipeline |
 | [Advanced](docs/advanced.md) | Batched inference, MCTS tricks, ONNX |
+| [SFT Guide](docs/sft-guide.md) | Train from game collections |
 | [Orca Bot](docs/orca.md) | Architecture, loading, training |
 
 ## Examples
