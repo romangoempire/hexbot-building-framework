@@ -292,6 +292,159 @@ replay buffer contains fewer samples than the batch size.
 
 ---
 
+## SFT Pre-Training (v4)
+
+Supervised fine-tuning bootstraps the network from expert games before self-play.
+
+```python
+from orca.sft import sft_train, import_games, scrape_games
+
+# Scrape games from an online source
+scrape_games(source='littlegolem', output='expert_games.jsonl', limit=5000)
+
+# Import and train
+samples = import_games('expert_games.jsonl')
+net = create_network('standard')
+net = sft_train(net, 'expert_games.jsonl', epochs=5, lr=1e-3)
+
+# Then continue with self-play
+trainer = OrcaTrainer(iterations=100)
+trainer.net = net
+trainer.run()
+```
+
+SFT trains on cross-entropy policy loss only (no value head) since expert games
+provide move labels but not reliable value targets. After SFT, switch to the
+full self-play pipeline which trains all three heads.
+
+### CLI
+
+```bash
+python -m orca.sft --games expert_games.jsonl --epochs 5 --lr 1e-3
+python -m orca.train --resume  # continues from SFT checkpoint
+```
+
+---
+
+## Mixed-Precision Training (v4)
+
+Enable automatic mixed precision (AMP) for ~2x training speedup on CUDA GPUs.
+
+```python
+from bot import train_step
+import torch
+
+scaler = torch.amp.GradScaler()
+losses = train_step(net, optimizer, replay_buffer, device='cuda', grad_scaler=scaler)
+```
+
+The `grad_scaler` parameter in `train_step()` enables fp16 forward passes with
+fp32 gradient accumulation. Loss scaling prevents underflow in fp16 gradients.
+
+### OrcaTrainer with Mixed Precision
+
+```python
+trainer = OrcaTrainer(
+    iterations=200,
+    device='cuda',
+    mixed_precision=True,  # auto-creates GradScaler
+)
+trainer.run()
+```
+
+### CLI
+
+```bash
+python -m orca.train --mixed-precision --device cuda
+```
+
+Mixed precision is only effective on CUDA GPUs with Tensor Cores (RTX 20+, A100, etc.).
+MPS and CPU fall back to fp32 automatically.
+
+---
+
+## Distributed Training (v4)
+
+Scale training across multiple GPUs or machines.
+
+### Multi-GPU (Single Machine)
+
+```python
+from orca.distributed import MultiGPUTrainer
+
+trainer = MultiGPUTrainer(net, device_ids=[0, 1, 2, 3])
+losses = trainer.train_step(batch)
+```
+
+Uses `torch.nn.DataParallel` to split batches across GPUs. Linear speedup for
+large batch sizes.
+
+### Distributed Self-Play
+
+```python
+from orca.distributed import SelfPlayPool
+
+pool = SelfPlayPool(num_workers=16, net=net)
+samples = pool.generate(num_games=200)
+pool.shutdown()
+```
+
+`SelfPlayPool` manages worker processes with automatic load balancing. Workers
+run on CPU; the training loop runs on GPU.
+
+### Ray-Based Distributed
+
+```python
+from orca.distributed import RayTrainer
+
+trainer = RayTrainer(net_config='standard', num_actors=32)
+trainer.run(iterations=100)
+```
+
+`RayTrainer` distributes self-play across a Ray cluster. Each actor is a
+remote process that can run on a different machine. The trainer aggregates
+samples and runs gradient updates centrally.
+
+```bash
+python -m orca.train --distributed ray --num-actors 32
+```
+
+---
+
+## Skill Curriculum (v4)
+
+The `SkillCurriculum` replaces the time-based curriculum with a 6-level
+progression tied to training milestones.
+
+```python
+from orca.curriculum import SkillCurriculum
+
+curriculum = SkillCurriculum(start_level=0)
+sims, games = curriculum.settings()
+```
+
+### Levels
+
+| Level | Sims | Games/iter | Focus |
+|-------|------|------------|-------|
+| 0 | 30 | 80 | Random openings, basic legality |
+| 1 | 50 | 60 | Line extension, simple blocking |
+| 2 | 100 | 50 | Threat detection, 4-in-a-row patterns |
+| 3 | 150 | 40 | Positional evaluation, colony play |
+| 4 | 200 | 30 | Complex tactical sequences |
+| 5 | 400 | 20 | Full-strength search |
+
+Advancement is triggered by ELO thresholds: when the bot's ELO exceeds the
+level's target, the curriculum advances automatically.
+
+### CLI
+
+```bash
+python -m orca.train --skill-curriculum --start-level 0
+```
+
+---
+
 ## CLI Reference
 
 ```

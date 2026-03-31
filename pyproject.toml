@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hexbot"
+version = "4.0.0"
+description = "Python framework for building AI bots for Hexagonal Connect-6"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Saiki77"},
+]
+keywords = ["hex", "connect-6", "ai", "bot", "mcts", "alphazero", "neural-network"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Games/Entertainment :: Board Games",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+dashboard = [
+    "flask>=2.0",
+    "flask-socketio>=5.0",
+    "psutil",
+]
+distributed = [
+    "ray>=2.0",
+]
+all = [
+    "flask>=2.0",
+    "flask-socketio>=5.0",
+    "psutil",
+    "ray>=2.0",
+    "requests",
+    "onnxruntime",
+]
+
+[project.urls]
+Homepage = "https://github.com/Saiki77/hexbot-building-framework"
+Repository = "https://github.com/Saiki77/hexbot-building-framework"
+
+[project.scripts]
+orca-train = "orca.train:main"
+orca-sft = "orca.sft:main"
+orca-scrape = "orca.scrape:main"
+
+[tool.setuptools]
+packages = ["orca"]
+py-modules = ["hexbot", "hexgame", "bot", "main", "dashboard"]
+
+[tool.setuptools.package-data]
+orca = ["checkpoint.pt"]
+"" = ["engine.c"]

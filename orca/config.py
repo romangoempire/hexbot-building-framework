@@ -80,6 +80,12 @@ COSINE_T_MULT = 2
 COSINE_ETA_MIN = 1e-4
 
 # ---------------------------------------------------------------------------
+# Mixed precision (CUDA only - MPS FP16 is unreliable)
+# ---------------------------------------------------------------------------
+USE_MIXED_PRECISION = True    # auto FP16 on CUDA, ignored on MPS/CPU
+GRAD_CLIP_NORM = 1.0          # gradient clipping (0 = disabled)
+
+# ---------------------------------------------------------------------------
 # Experimental: Transformer variant
 # ---------------------------------------------------------------------------
 TRANSFORMER_LAYERS = 2

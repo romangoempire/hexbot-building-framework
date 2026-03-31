@@ -29,6 +29,12 @@
 #define MAX_UNDO   250
 #define CAND_RADIUS 3  /* radius 3 allows 1-hex-gap placements for preemptives */
 
+/* Late Move Reduction (LMR) tuning */
+#define LMR_MOVE_THRESHOLD   6   /* apply LMR after this many moves searched */
+#define LMR_DEPTH_THRESHOLD  4   /* minimum depth to apply LMR */
+#define LMR_REDUCTION        2   /* plies to reduce by (progressive: +1 after move 12) */
+#define LMR_NN_MOVE_THRESHOLD 6  /* same for NN-guided search */
+
 /* Neighbor offsets for candidate expansion (pre-computed) */
 typedef struct { int dq, dr; } Offset;
 
@@ -789,10 +795,11 @@ static ABResult ab_solve(Board *b, int depth, float alpha, float beta, int ply) 
         board_place(b, move_q[i], move_r[i]);
 
         ABResult child;
-        /* Late move reduction */
+        /* Late move reduction (progressive) */
         int do_full = 1;
-        if (i >= 10 && depth >= 4) {
-            child = ab_solve(b, depth - 3, alpha, beta, ply + 1);
+        if (i >= LMR_MOVE_THRESHOLD && depth >= LMR_DEPTH_THRESHOLD) {
+            int reduction = LMR_REDUCTION + (i >= 12 ? 1 : 0); /* progressive */
+            child = ab_solve(b, depth - reduction, alpha, beta, ply + 1);
             if (maximizing && child.value <= alpha) do_full = 0;
             else if (!maximizing && child.value >= beta) do_full = 0;
         }
@@ -987,9 +994,10 @@ static ABResult nn_ab_solve(Board *b, int depth, int nn_depth,
 
         ABResult child;
         int do_full = 1;
-        /* LMR: reduced search for later moves */
-        if (i >= 8 && depth >= 4) {
-            child = nn_ab_solve(b, depth - 3, nn_depth, alpha, beta, ply + 1);
+        /* LMR: progressive reduction for later moves */
+        if (i >= LMR_NN_MOVE_THRESHOLD && depth >= LMR_DEPTH_THRESHOLD) {
+            int reduction = LMR_REDUCTION + (i >= 12 ? 1 : 0);
+            child = nn_ab_solve(b, depth - reduction, nn_depth, alpha, beta, ply + 1);
             if (maximizing && child.value <= alpha) do_full = 0;
             else if (!maximizing && child.value >= beta) do_full = 0;
         }

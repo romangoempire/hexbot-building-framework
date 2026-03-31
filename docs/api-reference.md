@@ -383,6 +383,197 @@ positions  # dict of pre-built starting positions for curriculum training
 
 ---
 
+## SFT Pipeline (v4)
+
+```python
+from orca.sft import sft_train, import_games
+```
+
+### sft_train(net, games_path, epochs=5, lr=1e-3, device=None) -> nn.Module
+Supervised fine-tuning on expert game data. Returns the fine-tuned network.
+
+### import_games(path, format='sgf') -> List[TrainingSample]
+Import games from SGF/JSONL files into training samples.
+
+### Game Scraper
+
+```python
+from orca.sft import scrape_games
+scrape_games(source='littlegolem', output='games.jsonl', limit=1000)
+```
+
+---
+
+## Endgame Solver (v4)
+
+```python
+from orca.solver import solve, quick_solve, solver_or_mcts, TranspositionCache
+```
+
+### solve(game, max_depth=None) -> dict
+Exact endgame solver. Returns `{'winner': int, 'pv': [(q,r), ...], 'nodes': int}`.
+
+### quick_solve(game, time_limit=1.0) -> Optional[dict]
+Time-limited solve attempt. Returns `None` if not solved in time.
+
+### solver_or_mcts(game, net, sims=200) -> (q, r)
+Use solver when position is solvable, fall back to MCTS otherwise.
+
+### TranspositionCache(max_size=2**20)
+Shared transposition table for solver. Methods: `.get(zhash)`, `.put(zhash, result)`, `.hit_rate()`.
+
+---
+
+## Opening Book (v4)
+
+```python
+from orca.openings import OpeningBook
+```
+
+### OpeningBook(path='openings.db')
+Persistent opening book backed by SQLite.
+
+| Method | Description |
+|--------|-------------|
+| `OpeningBook.build_from_games(games_path)` | Build book from game archive |
+| `book.lookup(game) -> Dict[(q,r), float]` | Look up position, returns move weights |
+| `book.blend(game, nn_policy, weight=0.3) -> Dict[(q,r), float]` | Blend book moves with NN policy |
+
+```python
+book = OpeningBook('openings.db')
+book.build_from_games('games.jsonl')
+policy = book.blend(game, nn_policy, weight=0.3)
+```
+
+---
+
+## Distributed Training (v4)
+
+```python
+from orca.distributed import SelfPlayPool, MultiGPUTrainer, RayTrainer
+```
+
+### SelfPlayPool(num_workers=8, net=None)
+Process pool for parallel self-play. Methods: `.generate(num_games)`, `.shutdown()`.
+
+### MultiGPUTrainer(net, device_ids=None)
+DataParallel training across multiple GPUs. Methods: `.train_step(batch)`, `.save()`.
+
+### RayTrainer(net_config='standard', num_actors=16)
+Ray-based distributed training with remote actors. Methods: `.run(iterations)`, `.status()`.
+
+```python
+pool = SelfPlayPool(num_workers=8)
+samples = pool.generate(num_games=100)
+```
+
+---
+
+## Skill Curriculum (v4)
+
+```python
+from orca.curriculum import SkillCurriculum
+```
+
+### SkillCurriculum(start_level=0)
+6-level curriculum that progressively introduces harder training conditions.
+
+| Level | Sims | Games/iter | Description |
+|-------|------|------------|-------------|
+| 0 | 30 | 80 | Random openings |
+| 1 | 50 | 60 | Basic tactics |
+| 2 | 100 | 50 | Threat patterns |
+| 3 | 150 | 40 | Positional play |
+| 4 | 200 | 30 | Complex endgames |
+| 5 | 400 | 20 | Full strength |
+
+Methods: `.current_level()`, `.advance()`, `.settings() -> (sims, games)`.
+
+---
+
+## Ensemble (v4)
+
+```python
+from orca.ensemble import Ensemble
+```
+
+### Ensemble.from_latest(n=3) -> Ensemble
+Load ensemble from the N most recent checkpoints.
+
+### ensemble.evaluate(game) -> (policy, value, uncertainty)
+Evaluate with uncertainty estimation. `uncertainty` is the stddev across members.
+
+### ensemble.best_move(game) -> (q, r)
+Pick the best move by averaged policy.
+
+---
+
+## Model Zoo (v4)
+
+```python
+from orca.zoo import Zoo
+```
+
+| Method | Description |
+|--------|-------------|
+| `Zoo.list() -> List[dict]` | List available models with metadata |
+| `Zoo.download(name) -> Path` | Download a model by name |
+| `Zoo.package(net, name, metadata)` | Package and upload a model |
+| `Zoo.load(name) -> nn.Module` | Download and load a model |
+
+```python
+Zoo.list()  # [{'name': 'orca-v4-std', 'elo': 1850, ...}]
+net = Zoo.load('orca-v4-std')
+```
+
+---
+
+## Leaderboard (v4)
+
+```python
+from orca.leaderboard import rate, compare, show
+```
+
+### rate(bot, opponents, num_games=50) -> float
+Rate a bot's ELO against a set of opponents.
+
+### compare(bot_a, bot_b, num_games=100) -> dict
+Head-to-head comparison. Returns `{'wins_a', 'wins_b', 'draws', 'elo_diff'}`.
+
+### show() -> DataFrame
+Display the current leaderboard as a pandas DataFrame.
+
+---
+
+## Plugin System (v4)
+
+```python
+from hexbot import register_bot, register_network
+```
+
+### register_bot(name, cls_or_fn)
+Register a custom bot that appears in Arena and the dashboard.
+
+### register_network(name, factory_fn)
+Register a custom network architecture for `create_network(name)`.
+
+```python
+register_bot('my-bot', MyBot)
+register_network('my-net', lambda: MyNetwork())
+```
+
+---
+
+## Installation (v4)
+
+```bash
+pip install hexbot
+```
+
+The package is defined in `pyproject.toml` and includes all dependencies.
+
+---
+
 ## Next Steps
 
 - [Getting Started](getting-started.md) - learn the HexGame API with examples

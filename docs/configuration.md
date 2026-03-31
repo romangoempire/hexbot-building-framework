@@ -134,6 +134,54 @@ using a cosine curve. Each restart period is `T_MULT` times longer than the prev
 
 ---
 
+## Mixed Precision (v4)
+
+| Parameter | Default | CLI Flag | Description |
+|-----------|---------|----------|-------------|
+| `MIXED_PRECISION` | `False` | `--mixed-precision` | Enable AMP (fp16 forward, fp32 grads) |
+| `GRAD_CLIP_NORM` | `1.0` | `--grad-clip` | Max gradient norm for clipping. `0` to disable |
+| `GRAD_SCALER_INIT` | `2**16` | -- | Initial loss scale for GradScaler |
+| `GRAD_SCALER_GROWTH` | `2.0` | -- | Scale growth factor on successful steps |
+
+Mixed precision is only effective on CUDA with Tensor Cores. On MPS/CPU it is
+silently ignored.
+
+Gradient clipping applies regardless of mixed precision and prevents exploding
+gradients during early training or with large learning rates.
+
+---
+
+## New Architecture Configs (v4)
+
+| Config | Params | Description |
+|--------|--------|-------------|
+| `hex-masked` | 3.9M | CNN with hex-neighbor masking on 3x3 filters (recommended) |
+| `hex-gnn` | 432K | Graph Neural Network on hex topology (experimental) |
+| `multiscale` | 1.1M | Local CNN + global attention two-tower (experimental) |
+
+### hex-gnn Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `GNN_LAYERS` | 8 | Message-passing layers |
+| `GNN_HIDDEN` | 128 | Hidden dimension per node |
+| `GNN_AGGR` | `'mean'` | Aggregation: `'mean'`, `'sum'`, `'max'` |
+
+### multiscale Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `MS_BRANCHES` | `[3, 5, 7]` | Kernel sizes for parallel branches |
+| `MS_FILTERS` | 64 | Filters per branch (total = 3 * 64 = 192) |
+| `MS_RES_BLOCKS` | 8 | Residual blocks after branch merge |
+
+```bash
+python -m orca.train --config hex-gnn
+python -m orca.train --config multiscale
+```
+
+---
+
 ## Experimental: Transformer Variant
 
 These parameters only apply when using `--config orca-transformer`:

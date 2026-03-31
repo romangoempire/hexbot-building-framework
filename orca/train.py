@@ -554,6 +554,8 @@ class OrcaTrainer:
         use_auto_tuner: bool = True,
         use_adaptive_lr: bool = True,
         use_augmentation: bool = True,
+        use_mixed_precision: bool = True,
+        grad_clip: float = 1.0,
         # Plateau detection
         plateau_threshold: Optional[float] = None,
         plateau_iters: Optional[int] = None,
@@ -619,6 +621,8 @@ class OrcaTrainer:
         self.use_auto_tuner = use_auto_tuner
         self.use_adaptive_lr = use_adaptive_lr
         self.use_augmentation = use_augmentation
+        self.use_mixed_precision = use_mixed_precision and self.device.type == 'cuda'
+        self.grad_clip = grad_clip
 
         # Initialized in run()
         self.net: Optional[HexNet] = None

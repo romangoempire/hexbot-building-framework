@@ -1,178 +1,160 @@
 # hexbot
 
-A Python framework for building AI bots for [Hexagonal Tic-Tac-Toe](https://hexo.did.science) (Connect-6 on an infinite hex grid). Fast C game engine, neural network training pipeline, and a live training dashboard.
+A Python framework for building AI bots for [Hexagonal Tic-Tac-Toe](https://hexo.did.science) (Connect-6 on an infinite hex grid). Fast C game engine, multiple neural network architectures, AlphaZero training pipeline, and a live training dashboard.
 
-Home of the **Orca** bot.
+Home of the **Orca** bot. `pip install -e .`
 
 ## Installation
 
 ```bash
 git clone https://github.com/Saiki77/hexbot-building-framework.git
 cd hexbot-building-framework
-pip install torch flask flask-socketio psutil
+pip install -e .               # core (game engine + torch)
+pip install -e '.[dashboard]'  # + dashboard UI
+pip install -e '.[all]'        # everything
 ```
 
 The C engine auto-compiles on first import (`cc`/`gcc`/`clang` required).
-
-## Game Rules
-
-| Rule | Detail |
-|------|--------|
-| Board | Infinite hexagonal grid (axial coordinates q, r) |
-| Players | 2 players alternating turns |
-| First turn | Player 0 places 1 stone |
-| Other turns | 2 stones per turn |
-| Win | 6 in a row on any of 3 hex axes |
 
 ## Quick Start
 
 ```python
 from hexbot import HexGame, Bot, Arena
 
-# Play a game
 game = HexGame()
-game.place(0, 0)       # P0: 1 stone first turn
-game.place(1, 0)       # P1: first of 2 stones
-game.place(1, -1)      # P1: second stone
+game.place(0, 0)         # P0: 1 stone first turn
+game.place(1, 0)         # P1: first of 2
+game.place(1, -1)        # P1: second stone
 
-# Build a bot (any function works)
+# Any function is a bot
 def my_bot(game):
-    moves = game.legal_moves()
-    return moves[0]
+    return game.legal_moves()[0]
 
-# Test it
 result = Arena(my_bot, Bot.heuristic(), num_games=20).play()
 ```
 
 ## Orca Bot
 
-Pre-trained AlphaZero-style bot (3.9M params, 128 filters, 12 residual blocks). The included checkpoint is early-stage (65 iterations) - with more training on a GPU it gets significantly stronger.
+Pre-trained AlphaZero-style bot. The included checkpoint is early-stage (65 iterations) - gets significantly stronger with more training.
 
 ```python
 from hexbot import Bot
-
 orca = Bot.orca()
 move = orca.best_move(game)
 ```
 
-Train from scratch or continue training:
+### Train
+
 ```bash
-python -m orca.train                              # train with defaults
-python -m orca.train --iterations 100 --lr 0.002  # custom params
-python -m orca.train --config orca-transformer    # experimental transformer
+# From game collections (fast bootstrap)
+python -m orca.scrape --games 5000 --output games.jsonl
+python -m orca.sft --data games.jsonl --then-selfplay 50
+
+# Pure self-play
+python -m orca.train --iterations 100
+
+# With web dashboard
+python train_dashboard.py
 ```
 
-See [Orca documentation](docs/orca.md) for details.
+### Network Architectures
 
-## Training Dashboard
+| Config | Params | Description |
+|--------|--------|-------------|
+| `fast` | 656K | Quick experiments |
+| `standard` | 3.9M | Default Orca (128 filters, 12 ResBlocks) |
+| `hex-masked` | 3.9M | Hex-neighbor masked CNN (recommended for hex) |
+| `large` | 14.5M | Maximum strength (256 filters) |
+| `orca-transformer` | 4.4M | CNN + transformer attention |
+| `hex-gnn` | 432K | Graph neural network on hex topology |
+| `multiscale` | 1.1M | Local CNN + global attention two-tower |
 
-Live visualization with REST API + WebSocket. Works with any bot in any language.
-
-```python
-from dashboard import Dashboard
-dash = Dashboard(port=5001)
-dash.start()
-dash.run_arena(Bot.heuristic(), Bot.random(), games=100)
+```bash
+python -m orca.train --config hex-gnn --iterations 50
 ```
 
-See [Dashboard guide](docs/dashboard-guide.md) for the full API.
+## Features
+
+| Feature | Description |
+|---------|-------------|
+| **SFT Pipeline** | Train from game collections (JSONL/CSV/text), chain with self-play |
+| **Endgame Solver** | Deep alpha-beta with transposition cache, integrates with MCTS |
+| **Opening Book** | Trie-based lookup from winning games, blends with MCTS policy |
+| **6 Architectures** | CNN, transformer, GNN, multiscale, hybrid, fast |
+| **Mixed Precision** | FP16 on CUDA for 2x training speed |
+| **Distributed** | Multi-GPU (DDP) and multi-machine (Ray) |
+| **Skill Curriculum** | 6-level auto-progression: basics through endgame |
+| **Ensemble** | Average N checkpoints with uncertainty estimation |
+| **Model Zoo** | Share and download community models |
+| **Leaderboard** | Rate bots against references, compare head-to-head |
+| **Plugin System** | Register custom bots and network architectures |
+| **Dashboard** | REST + WebSocket API, live game replay, charts |
+| **30+ API Functions** | NN eval, MCTS search, threats, solver, augmentation |
 
 ## Bot Approaches
 
-6 ways to build a bot, from simple heuristics to neural networks:
-
-| # | Approach | Complexity | Strength |
-|---|----------|-----------|----------|
-| 1 | [Hand-tuned evaluation](docs/bot-approaches.md#approach-1-hand-tuned-evaluation) | Low | Medium |
-| 2 | [Evolutionary weights](docs/bot-approaches.md#approach-2-evolutionary-weights) | Low | Medium |
-| 3 | [Minimax with alpha-beta](docs/bot-approaches.md#approach-3-minimax-with-alpha-beta) | Medium | High |
-| 4 | [Monte Carlo playouts](docs/bot-approaches.md#approach-4-monte-carlo-random-playouts) | Medium | Medium |
-| 5 | [Neural network (AlphaZero)](docs/bot-approaches.md#approach-5-neural-network-alphazero-style) | High | Highest |
-| 6 | [Hybrid strategies](docs/bot-approaches.md#approach-6-combine-multiple-strategies) | High | Highest |
+| # | Approach | Complexity |
+|---|----------|-----------|
+| 1 | [Hand-tuned evaluation](docs/bot-approaches.md#approach-1-hand-tuned-evaluation) | Low |
+| 2 | [Evolutionary weights](docs/bot-approaches.md#approach-2-evolutionary-weights) | Low |
+| 3 | [Minimax with alpha-beta](docs/bot-approaches.md#approach-3-minimax-with-alpha-beta) | Medium |
+| 4 | [Monte Carlo playouts](docs/bot-approaches.md#approach-4-monte-carlo-random-playouts) | Medium |
+| 5 | [Neural network (AlphaZero)](docs/bot-approaches.md#approach-5-neural-network-alphazero-style) | High |
+| 6 | [Hybrid strategies](docs/bot-approaches.md#approach-6-combine-multiple-strategies) | High |
 
 ## Architecture
 
 ```
-hexbot.py            Framework API (Bot, Arena, train)
-hexgame.py           Game engine (wraps C engine via ctypes)
-engine.c             2,300 lines of optimized C (bitboard win detection)
-bot.py               Neural network, MCTS, training pipeline
-dashboard.py         Live dashboard API (REST + WebSocket)
-train_dashboard.py   Training dashboard with web UI
+hexbot.py              Framework API (Bot, Arena, 30+ analysis functions)
+hexgame.py             Game engine (wraps C engine via ctypes)
+engine.c               2,300 lines optimized C (bitboard win detection)
+bot.py                 Neural networks, MCTS, training pipeline
+dashboard.py           Dashboard API (REST + WebSocket)
+train_dashboard.py     Training dashboard with web UI
+pyproject.toml         pip install config
 orca/
-  __init__.py        Orca bot loader
-  config.py          All tunable parameters
-  train.py           Training pipeline (CLI + library)
-  transformer_net.py Experimental transformer variant
-  checkpoint.pt      Pre-trained weights (iter 60)
-docs/                Detailed documentation
-examples/            Example bot scripts
+  __init__.py          Orca bot loader
+  config.py            All tunable parameters
+  train.py             Training pipeline (CLI + library)
+  sft.py               Supervised fine-tuning from games
+  scrape.py            Game downloader
+  solver.py            Endgame solver
+  openings.py          Opening book
+  curriculum.py        Skill-based curriculum
+  ensemble.py          Multi-checkpoint ensemble
+  distributed.py       Multi-GPU / Ray training
+  zoo.py               Model zoo
+  leaderboard.py       Bot rating system
+  transformer_net.py   Transformer architecture
+  hex_gnn.py           Graph neural network
+  multiscale_net.py    Multi-scale architecture
+  checkpoint.pt        Pre-trained weights
+docs/                  Detailed documentation
+examples/              Example bot scripts
 ```
 
 ## Device Support
 
-Auto-detects the best available device:
-
 | Priority | Device | Platform |
 |----------|--------|----------|
-| 1 | CUDA | Linux/Windows with NVIDIA GPU |
-| 2 | MPS | macOS with Apple Silicon |
+| 1 | CUDA | NVIDIA GPU (Linux/Windows) |
+| 2 | MPS | Apple Silicon (macOS) |
 | 3 | CPU | Any platform |
-
-## Configuration
-
-Every training parameter is adjustable via `orca/config.py`, CLI flags, or Python kwargs:
-
-```bash
-python -m orca.train --help   # see all options
-```
-
-```python
-from orca.train import OrcaTrainer
-OrcaTrainer(lr=0.002, mcts_sims=100, batch_size=512).run()
-```
-
-See [Configuration reference](docs/configuration.md) for all parameters.
 
 ## Documentation
 
 | Guide | Description |
 |-------|-------------|
 | [Getting Started](docs/getting-started.md) | Game API, coordinates, turn structure |
-| [Bot Approaches](docs/bot-approaches.md) | 6 approaches with full code examples |
-| [API Reference](docs/api-reference.md) | Complete function signatures |
-| [Training Guide](docs/training-guide.md) | Self-play, curriculum, ELO, checkpoints |
-| [Configuration](docs/configuration.md) | All tunable parameters |
-| [Dashboard](docs/dashboard-guide.md) | REST API, WebSocket, keyboard shortcuts |
-| [Train Dashboard](docs/train-dashboard.md) | Web UI for Orca training pipeline |
-| [Advanced](docs/advanced.md) | Batched inference, MCTS tricks, ONNX |
-| [Orca Bot](docs/orca.md) | Architecture, loading, training |
-
-## Examples
-
-| File | Description |
-|------|-------------|
-| `examples/play_random.py` | Heuristic vs random |
-| `examples/custom_eval.py` | Hand-tuned evaluation |
-| `examples/evolutionary.py` | Evolve scoring weights |
-| `examples/train_bot.py` | Train AlphaZero bot |
-| `examples/bot_vs_bot.py` | Compare bot types |
-| `examples/play_orca.py` | Play against Orca |
-| `examples/train_orca.py` | Quick training demo |
-| `examples/dashboard_arena.py` | Dashboard with arena |
-| `examples/dashboard_train.py` | Dashboard with training |
-| `examples/dashboard_custom_bot.py` | Custom bot + dashboard |
-| `test_dashboard.py` | Evolving bot demo |
-
-## Performance
-
-| Operation | Throughput |
-|-----------|-----------|
-| Random game playouts | ~30,000 games/sec |
-| C engine move scoring | ~100,000 positions/sec |
-| Alpha-beta search (depth 8) | ~50,000 nodes/sec |
-| NN inference (batch=64) | ~2,300 positions/sec |
-| Self-play (200 sims) | ~500 games/hour |
+| [Bot Approaches](docs/bot-approaches.md) | 6 approaches with full code |
+| [API Reference](docs/api-reference.md) | All function signatures |
+| [Training Guide](docs/training-guide.md) | Self-play, SFT, curriculum, distributed |
+| [Configuration](docs/configuration.md) | Every tunable parameter |
+| [Dashboard](docs/dashboard-guide.md) | REST API, WebSocket |
+| [Train Dashboard](docs/train-dashboard.md) | Web UI for training |
+| [SFT Guide](docs/sft-guide.md) | Train from game collections |
+| [Advanced](docs/advanced.md) | Solver, opening book, ensemble, MCTS tricks |
+| [Orca Bot](docs/orca.md) | Architectures, loading, training |
 
 ## Contributing
 

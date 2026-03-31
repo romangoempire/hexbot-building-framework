@@ -44,10 +44,18 @@ __all__ = [
     'mcts_search', 'mcts_policy',
     # Training
     'TrainingSample', 'ReplayBuffer', 'self_play', 'train_step', 'augment_sample',
+    # Solver + openings
+    'solve', 'quick_solve', 'opening_move', 'OpeningBook',
+    # Ensemble
+    'Ensemble',
     # Bot framework
     'Bot', 'BotProtocol', 'Arena', 'ArenaResult', 'train',
+    # Plugin system
+    'register_bot', 'register_network', 'registered_bots', 'registered_networks',
+    # Model zoo
+    'Zoo',
     # Data
-    'positions', 'load_games', 'generate_puzzles',
+    'positions', 'load_games', 'generate_puzzles', 'import_games',
 ]
 
 
@@ -272,6 +280,89 @@ def detect_fork(game, player: Optional[int] = None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Endgame solver
+# ---------------------------------------------------------------------------
+
+def solve(game, max_depth: int = 12, time_limit: float = 5.0) -> Dict:
+    """Solve a position using deep alpha-beta search.
+
+    Returns dict with 'result' ('win'/'loss'/'unknown'), 'move', 'value',
+    'depth', 'nodes', 'time'.
+
+    Example:
+        result = solve(game, max_depth=16)
+        if result['result'] == 'win':
+            print(f"Forced win: play {result['move']}")
+    """
+    from orca.solver import solve as _solve
+    return _solve(game, max_depth=max_depth, time_limit=time_limit)
+
+
+def quick_solve(game, depth: int = 6) -> Optional[Tuple[int, int]]:
+    """Quick solve attempt. Returns winning move or None.
+
+    Example:
+        move = quick_solve(game)
+        if move:
+            game.place(*move)  # guaranteed win
+    """
+    from orca.solver import quick_solve as _qs
+    return _qs(game, depth=depth)
+
+
+def opening_move(game, temperature: float = 0.5) -> Optional[Tuple[int, int]]:
+    """Look up the best opening move from the book.
+
+    Returns None if the position isn't in the book.
+
+    Example:
+        move = opening_move(game)
+        if move:
+            game.place(*move)
+    """
+    from orca.openings import build_default_book
+    book = build_default_book()
+    return book.lookup(game, temperature=temperature)
+
+
+# Lazy import for OpeningBook
+def OpeningBook():
+    """Create an opening book. See orca.openings for full API.
+
+    Example:
+        book = OpeningBook()
+        book.build_from_games(games)
+        book.save('my_openings.json')
+    """
+    from orca.openings import OpeningBook as _OB
+    return _OB()
+
+
+# ---------------------------------------------------------------------------
+# Ensemble evaluation
+# ---------------------------------------------------------------------------
+
+def Ensemble(paths=None, n=5, net_config='standard'):
+    """Create an ensemble evaluator from multiple checkpoints.
+
+    Averages predictions from N networks for stronger, more stable play.
+    Returns uncertainty estimates for position complexity.
+
+    Example:
+        from hexbot import Ensemble
+        ens = Ensemble(n=3)  # last 3 checkpoints
+        policy, value, uncertainty = ens.evaluate(game)
+
+        # Or specific checkpoints:
+        ens = Ensemble(paths=['ckpt_50.pt', 'ckpt_60.pt'])
+    """
+    from orca.ensemble import Ensemble as _Ens
+    if paths:
+        return _Ens.from_checkpoints(paths, net_config=net_config)
+    return _Ens.from_latest(n=n, net_config=net_config)
+
+
+# ---------------------------------------------------------------------------
 # Neural network access
 # ---------------------------------------------------------------------------
 
@@ -467,6 +558,74 @@ def mcts_policy(game, net=None, sims: int = 200, temperature: float = 1.0,
 # Training building blocks
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Plugin system
+# ---------------------------------------------------------------------------
+
+_registered_bots: Dict[str, type] = {}
+_registered_networks: Dict[str, type] = {}
+
+
+def register_bot(name: str, bot_class):
+    """Register a custom bot class for use with Arena and the framework.
+
+    The class must have a best_move(game) method.
+
+    Example:
+        class MyBot:
+            def best_move(self, game):
+                return game.legal_moves()[0]
+
+        register_bot('my-bot', MyBot)
+        # Now usable everywhere:
+        bot = registered_bots()['my-bot']()
+    """
+    _registered_bots[name] = bot_class
+
+
+def register_network(name: str, net_class):
+    """Register a custom network architecture.
+
+    The class must accept (board_size, num_channels) and have
+    forward(x) returning (policy, value, threat).
+
+    After registration, use with create_network(name).
+
+    Example:
+        register_network('my-arch', MyNetwork)
+        net = create_network('my-arch')
+    """
+    _registered_networks[name] = net_class
+
+
+def registered_bots() -> Dict[str, type]:
+    """Get all registered bot classes."""
+    return dict(_registered_bots)
+
+
+def registered_networks() -> Dict[str, type]:
+    """Get all registered network architectures."""
+    return dict(_registered_networks)
+
+
+# ---------------------------------------------------------------------------
+# Model Zoo
+# ---------------------------------------------------------------------------
+
+def Zoo():
+    """Access the model zoo for sharing and downloading community models.
+
+    Example:
+        from hexbot import Zoo
+        zoo = Zoo()
+        zoo.list()
+        bot = zoo.load('orca-v3')
+    """
+    from orca.zoo import Zoo as _Zoo
+    return _Zoo
+
+
+# ---------------------------------------------------------------------------
 # Lazy imports to avoid loading PyTorch for basic game usage
 _training_imports_done = False
 TrainingSample = None
@@ -556,6 +715,22 @@ def load_games(path: str):
     """
     from bot import load_human_games
     return load_human_games(path)
+
+
+def import_games(path: str, min_moves: int = 6, min_elo: int = 0,
+                 max_games: int = 999999):
+    """Import games from any format (JSONL, CSV, text).
+
+    Auto-detects format. Returns list of dicts with 'moves' and 'result'.
+    Use for SFT training or analysis.
+
+    Example:
+        games = import_games('strong_games.jsonl', min_elo=1200)
+        from orca.sft import games_to_samples
+        samples = games_to_samples(games)
+    """
+    from orca.sft import import_games as _imp
+    return _imp(path, min_moves=min_moves, min_elo=min_elo, max_games=max_games)
 
 
 def generate_puzzles(n: int = 100):

@@ -261,3 +261,117 @@ python -m orca.train --config orca-transformer
 
 The transformer variant is not yet tested in competitive play. It may produce
 stronger results but requires more compute per training step.
+
+---
+
+## New Architectures (v4)
+
+### HexGNN (`hex-gnn`)
+
+A Graph Neural Network that treats the hex board as a graph with hex-aware
+adjacency. Each cell is a node; edges connect hex neighbors (6-connected).
+
+```python
+from orca.hex_gnn import HexGNN
+
+net = create_network('hex-gnn')  # ~3.2M params
+```
+
+| Property | Value |
+|----------|-------|
+| Parameters | ~3.2M |
+| Layers | 8 message-passing |
+| Receptive field | Global (after 8 hops) |
+| Advantage | Native hex topology, no grid artifacts |
+
+### MultiscaleNet (`multiscale`)
+
+Parallel multi-scale convolutions capture patterns at different spatial scales
+simultaneously, then merge features before the residual tower.
+
+```python
+from orca.multiscale_net import MultiscaleNet
+
+net = create_network('multiscale')  # ~6.1M params
+```
+
+| Property | Value |
+|----------|-------|
+| Parameters | ~6.1M |
+| Branches | 3x3 + 5x5 + 7x7 parallel convolutions |
+| Advantage | Captures both local tactics and broad structure |
+
+### HexMaskedNet (`hex-masked`) -- Recommended
+
+Standard CNN with hex-neighbor masking on 3x3 conv filters. Zeros out the
+top-left and bottom-right kernel positions that correspond to non-hex-neighbors
+in axial coordinates:
+
+```
+Standard 3x3:    Hex-masked 3x3:
+[a] [b] [c]      [0] [b] [c]
+[d] [e] [f]  ->  [d] [e] [f]
+[g] [h] [i]      [g] [h] [0]
+```
+
+```python
+net = create_network('hex-masked')  # ~3.9M params (same as standard)
+```
+
+| Property | Value |
+|----------|-------|
+| Parameters | ~3.9M (identical to standard HexNet) |
+| Speed | Same as standard CNN |
+| Advantage | Respects hex topology without GNN complexity |
+
+The mask is applied during every forward pass so gradients never flow through
+non-neighbor positions. Same speed and parameter count as standard HexNet but
+the network can only learn hex-valid patterns.
+
+All architectures share the same policy/value/threat head interface as HexNet
+and are drop-in replacements via `--config hex-masked`, `--config hex-gnn`, etc.
+
+---
+
+## Ensemble (v4)
+
+Combine multiple checkpoints for stronger play and uncertainty estimation.
+
+```python
+from orca.ensemble import Ensemble
+
+ens = Ensemble.from_latest(n=3)         # last 3 checkpoints
+policy, value, unc = ens.evaluate(game) # unc = stddev across members
+move = ens.best_move(game)              # averaged policy
+```
+
+Use uncertainty to detect positions where the model is unsure -- high
+uncertainty suggests the position would benefit from more MCTS simulations
+or solver verification.
+
+---
+
+## Model Zoo (v4)
+
+Share and download pre-trained models.
+
+```python
+from orca.zoo import Zoo
+
+# Browse available models
+for m in Zoo.list():
+    print(f"{m['name']}  ELO={m['elo']}  params={m['params']}")
+
+# Download and use
+net = Zoo.load('orca-v4-std')
+
+# Package and share your own
+Zoo.package(net, name='my-orca', metadata={'elo': 1900, 'iters': 500})
+```
+
+| Method | Description |
+|--------|-------------|
+| `Zoo.list()` | List models with name, ELO, param count, description |
+| `Zoo.download(name)` | Download checkpoint to local cache, return path |
+| `Zoo.load(name)` | Download + load into `nn.Module` |
+| `Zoo.package(net, name, metadata)` | Package a trained model for sharing |

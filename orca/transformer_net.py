@@ -160,7 +160,7 @@ class TransformerHexNet(nn.Module):
         seq = self.post_attn_norm(seq)
 
         # Reshape back to spatial: (batch, num_filters, N, N)
-        x = seq.permute(0, 2, 1).view(batch, C, N, N)
+        x = seq.permute(0, 2, 1).contiguous().view(batch, C, N, N)
 
         # Policy head
         p = F.relu(self.policy_bn(self.policy_conv(x)))

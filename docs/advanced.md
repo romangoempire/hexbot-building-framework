@@ -214,6 +214,171 @@ and run inference on CPU, but the ONNX export is still performed as a fallback.
 
 ---
 
+## Endgame Solver (v4)
+
+Exact endgame solver for positions near the end of the game. When the number of
+empty cells is small enough, the solver proves wins/losses with certainty.
+
+```python
+from orca.solver import solve, quick_solve, solver_or_mcts, TranspositionCache
+```
+
+### Exact Solve
+
+```python
+result = solve(game, max_depth=None)
+# {'winner': 0, 'pv': [(3,4), (5,2), ...], 'nodes': 84231}
+```
+
+`solve()` uses alpha-beta with a dedicated `TranspositionCache` to exhaustively
+search the endgame tree. Returns the proven winner and principal variation.
+
+### Time-Limited Solve
+
+```python
+result = quick_solve(game, time_limit=1.0)  # 1 second budget
+if result is not None:
+    print(f"Solved: winner={result['winner']}")
+```
+
+Returns `None` if the position cannot be solved within the time limit.
+
+### Hybrid: Solver or MCTS
+
+```python
+move = solver_or_mcts(game, net, sims=200)
+```
+
+Attempts `quick_solve` first. If the position is solvable, returns the proven
+best move. Otherwise falls back to MCTS. This is the recommended approach for
+competition play -- it guarantees correct endgame play while relying on MCTS
+for the complex middle game.
+
+### TranspositionCache
+
+```python
+cache = TranspositionCache(max_size=2**20)  # ~1M entries
+cache.put(game.zhash, result)
+cached = cache.get(game.zhash)
+print(f"Hit rate: {cache.hit_rate():.1%}")
+```
+
+Shared across solver calls to avoid re-solving the same subtree. Uses Zobrist
+hashes as keys. LRU eviction when the cache is full.
+
+---
+
+## Opening Book (v4)
+
+Pre-computed opening moves for the first N plies, built from expert game data.
+
+```python
+from orca.openings import OpeningBook
+
+book = OpeningBook('openings.db')
+```
+
+### Build from Games
+
+```python
+book.build_from_games('expert_games.jsonl')
+```
+
+Extracts the first 20 moves from each game and aggregates win rates per move
+at each position. Stored in SQLite for fast lookup.
+
+### Lookup and Blend
+
+```python
+# Direct lookup
+moves = book.lookup(game)  # {(q,r): weight, ...} or {} if not in book
+
+# Blend with NN policy
+blended = book.blend(game, nn_policy, weight=0.3)
+# 30% book + 70% neural network
+```
+
+`blend()` is useful during self-play to inject opening diversity. The weight
+decays to zero as the game progresses past the book's depth.
+
+---
+
+## Ensemble Uncertainty (v4)
+
+The `Ensemble` class evaluates positions with multiple models and reports
+disagreement as an uncertainty measure.
+
+```python
+from orca.ensemble import Ensemble
+
+ens = Ensemble.from_latest(n=5)
+policy, value, uncertainty = ens.evaluate(game)
+```
+
+- `policy`: averaged move probabilities across all ensemble members
+- `value`: mean value prediction
+- `uncertainty`: standard deviation of value predictions
+
+### Applications
+
+- **Adaptive search**: allocate more MCTS simulations to high-uncertainty positions
+- **Active learning**: prioritize uncertain positions for training
+- **Solver triggering**: high uncertainty near endgame suggests solver verification
+
+```python
+if uncertainty > 0.3 and game.total_stones > 50:
+    move = solver_or_mcts(game, net, sims=400)  # boost sims
+else:
+    move = ens.best_move(game)
+```
+
+---
+
+## Late Move Reduction (LMR)
+
+The C engine's alpha-beta search uses progressive Late Move Reduction to prune
+unpromising moves without full-depth search. After the first N moves are searched
+at full depth, remaining moves get a reduced-depth search. If the reduced search
+surprises (exceeds alpha/beta), a full re-search is done.
+
+Configurable defines in `engine.c`:
+
+| Define | Default | Description |
+|--------|---------|-------------|
+| `LMR_MOVE_THRESHOLD` | 6 | Apply LMR after this many moves |
+| `LMR_DEPTH_THRESHOLD` | 4 | Minimum depth to apply LMR |
+| `LMR_REDUCTION` | 2 | Base plies to reduce (moves 6-11) |
+| Progressive | +1 | Moves 12+ reduce by 3 plies |
+
+Both `ab_solve` (heuristic) and `nn_ab_solve` (NN-guided) use the same LMR
+system. More aggressive settings (lower threshold, higher reduction) make
+search faster but may miss tactical moves.
+
+---
+
+## Hex-Masked Convolution
+
+Standard CNNs treat the 3x3 kernel as a square grid, but in axial hex
+coordinates, positions (0,0) and (2,2) in the kernel are NOT hex neighbors.
+The hex-masked conv zeros out these positions so the network only learns
+from actual hex-adjacent cells.
+
+Use `create_network('hex-masked')` for the masked variant. Same parameter
+count and speed as the standard CNN, but cleaner hex-aware features.
+
+---
+
+## Running Tests
+
+```bash
+python tests/run_all.py
+```
+
+82 tests covering: game API, bot/arena, all network architectures, training
+pipeline, augmentation, solver, opening book, curriculum, and SFT parser.
+
+---
+
 ## Device Support
 
 The framework auto-detects the best available device:
