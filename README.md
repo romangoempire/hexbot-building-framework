@@ -2,9 +2,17 @@
 
 A Python framework for building AI bots for [Hexagonal Tic-Tac-Toe](https://hexo.did.science) (Connect-6 on an infinite hex grid). Fast C game engine, multiple neural network architectures, AlphaZero training pipeline, and a live training dashboard.
 
-Home of the **Orca** bot. `pip install -e .`
+Home of the **Orca** bot.
+
+[![PyPI](https://img.shields.io/pypi/v/hexbot)](https://pypi.org/project/hexbot/)
 
 ## Installation
+
+```bash
+pip install hexbot
+```
+
+Or from source (for development):
 
 ```bash
 git clone https://github.com/Saiki77/hexbot-building-framework.git
